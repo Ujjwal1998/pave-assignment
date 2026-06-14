@@ -1,0 +1,6 @@
+encore.dev v1.57.5 h1:gpcE2XF4Qvh0IzD+seLf9DPV9q8Mzr7bMaNJfpF2xuc=
+encore.dev v1.57.5/go.mod h1:lK8vSJG6uhYeUwT87/FEpcLdiN98QUcotd3gxRX0xDw=
+github.com/govalues/decimal v0.1.36 h1:dojDpsSvrk0ndAx8+saW5h9WDIHdWpIwrH/yhl9olyU=
+github.com/govalues/decimal v0.1.36/go.mod h1:Ee7eI3Llf7hfqDZtpj8Q6NCIgJy1iY3kH1pSwDrNqlM=
+github.com/govalues/money v0.2.4 h1:UpHB7s77OmOid6DBf8FWJoojTu2e+oTw2JA4G+VRVxs=
+github.com/govalues/money v0.2.4/go.mod h1:8UEv+C0wA4cjF6mEkgoNsVo46O/r1EecRnvIq4OyAL0=
