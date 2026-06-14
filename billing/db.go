@@ -84,7 +84,7 @@ func CreateBill(ctx context.Context, params CreateBillParams) (CreateBillResult,
 	return CreateBillResult{Bill: existing, Created: false}, nil
 }
 
-func GetBill(ctx context.Context, billID string) (domain.Bill, error) {
+func GetBillByID(ctx context.Context, billID string) (domain.Bill, error) {
 	const query = `SELECT` + billColumns + ` FROM bills WHERE id = $1`
 
 	row := billingDB.QueryRow(ctx, query, billID)
@@ -231,7 +231,7 @@ func getLineItemByExternalRef(ctx context.Context, billID, externalReferenceID s
 }
 
 func classifyBillUpdateFailure(ctx context.Context, billID string) error {
-	bill, err := GetBill(ctx, billID)
+	bill, err := GetBillByID(ctx, billID)
 	if err != nil {
 		return err
 	}
