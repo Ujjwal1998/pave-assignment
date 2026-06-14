@@ -55,7 +55,7 @@ type InsertLineItemResult struct {
 	Created  bool
 }
 
-func CreateBill(ctx context.Context, params CreateBillParams) (CreateBillResult, error) {
+func CreateBillRecord(ctx context.Context, params CreateBillParams) (CreateBillResult, error) {
 	const query = `
 		INSERT INTO bills (customer_id, period_start, period_end, currency)
 		VALUES ($1, $2, $3, $4)
