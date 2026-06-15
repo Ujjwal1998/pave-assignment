@@ -96,6 +96,48 @@ func TestParseAddLineItemRequestOutOfPeriod(t *testing.T) {
 	}
 }
 
+func TestParseAddLineItemRequestInvalidFeeType(t *testing.T) {
+	bill := domain.Bill{
+		ID:          "bill-1",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	_, err := parseAddLineItemRequest(&domain.AddLineItemRequest{
+		FeeType:             domain.FeeType("test"),
+		Description:         "test",
+		Quantity:            "1",
+		UnitPrice:           "1.00",
+		EffectiveDate:       "2025-01-01",
+		ExternalReferenceID: "test",
+	}, bill)
+	if !errors.Is(err, domain.ErrInvalidFeeType) {
+		t.Fatalf("expected ErrInvalidFeeType, got %v", err)
+	}
+}
+
+func TestParseAddLineItemRequestMissingQuantity(t *testing.T) {
+	bill := domain.Bill{
+		ID:          "bill-1",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	_, err := parseAddLineItemRequest(&domain.AddLineItemRequest{
+		FeeType:             domain.FeeTypeSubscription,
+		Description:         "test",
+		Quantity:            "",
+		UnitPrice:           "1.00",
+		EffectiveDate:       "2025-01-01",
+		ExternalReferenceID: "test",
+	}, bill)
+	if err == nil || err.Error() != "quantity is required" {
+		t.Fatalf("expected quantity is required, got %v", err)
+	}
+}
+
 func TestParseAddLineItemRequestDiscount(t *testing.T) {
 	bill := domain.Bill{
 		ID:          "bill-1",

@@ -63,6 +63,15 @@ func parseAddLineItemRequest(req *domain.AddLineItemRequest, bill domain.Bill) (
 	if !req.FeeType.Valid() {
 		return InsertLineItemParams{}, domain.ErrInvalidFeeType
 	}
+	if req.Quantity == "" {
+		return InsertLineItemParams{}, fmt.Errorf("quantity is required")
+	}
+	if req.UnitPrice == "" {
+		return InsertLineItemParams{}, fmt.Errorf("unit_price is required")
+	}
+	if req.EffectiveDate == "" {
+		return InsertLineItemParams{}, fmt.Errorf("effective_date is required")
+	}
 
 	quantity, err := parsePositiveDecimal(req.Quantity, "quantity")
 	if err != nil {

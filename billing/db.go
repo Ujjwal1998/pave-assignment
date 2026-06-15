@@ -9,6 +9,7 @@ import (
 
 	"encore.dev/storage/sqldb"
 	"github.com/govalues/decimal"
+	"pave-bank/activity"
 	"pave-bank/domain"
 )
 
@@ -191,6 +192,33 @@ func ListLineItems(ctx context.Context, billID string) ([]domain.LineItem, error
 		return nil, fmt.Errorf("iterate line items: %w", err)
 	}
 	return items, nil
+}
+
+func listLineItemAmounts(ctx context.Context, billID string) ([]activity.LineAmount, error) {
+	const query = `
+		SELECT total_amount, currency
+		FROM line_items
+		WHERE bill_id = $1
+		ORDER BY effective_date, created_at`
+
+	rows, err := billingDB.Query(ctx, query, billID)
+	if err != nil {
+		return nil, fmt.Errorf("list line item amounts: %w", err)
+	}
+	defer rows.Close()
+
+	var amounts []activity.LineAmount
+	for rows.Next() {
+		var amount activity.LineAmount
+		if err := rows.Scan(&amount.Amount, &amount.Currency); err != nil {
+			return nil, fmt.Errorf("scan line item amount: %w", err)
+		}
+		amounts = append(amounts, amount)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate line item amounts: %w", err)
+	}
+	return amounts, nil
 }
 
 func getBillByUniqueKey(ctx context.Context, customerID string, periodStart, periodEnd time.Time, currency string) (domain.Bill, error) {
