@@ -2,28 +2,34 @@
 
 Progressive accrual billing API built with [Encore](https://encore.dev) and [Temporal](https://temporal.io).
 
+## Architecture
+
+```
+POST /bills          → DB insert + start Temporal workflow (bill-{id})
+POST /line-items     → DB only (idempotent via external_reference_id)
+POST /close          → Signal workflow → ComputeTotal → UpdateBillClosed
+GET /bills/:id       → DB read (line items included when closed)
+```
+
+- **Postgres** (via Encore `sqldb`) is the source of truth for reads.
+- **Temporal** manages the open → closed lifecycle; line items are not on the critical path.
+- **Worker** runs inside `encore run` on task queue `{env}-billing`.
+
 ## Prerequisites
 
 ```bash
-brew install encoredev/tap/encore temporal
+brew install encoredev/tap/encore temporal jq
 ```
 
-For local Temporal, use either:
+Docker Desktop must be running (Encore provisions local Postgres).
 
-- **Temporal CLI dev server** (recommended; replaces deprecated [Temporalite](https://github.com/temporalio/temporalite-archived)):
+For local Temporal:
 
-  ```bash
-  temporal server start-dev --namespace default --port 7233
-  ```
+```bash
+temporal server start-dev --namespace default --port 7233
+```
 
-- **Temporalite** (legacy single-binary dev server):
-
-  ```bash
-  go install github.com/temporalio/temporalite/cmd/temporalite@v0.3.0
-  temporalite start --namespace default
-  ```
-
-Both expose the gRPC frontend on `127.0.0.1:7233` and the Web UI on `http://localhost:8233`.
+Web UI: http://localhost:8233
 
 ## Run locally
 
@@ -33,43 +39,82 @@ Terminal 1 — Temporal:
 temporal server start-dev --namespace default --port 7233
 ```
 
-Terminal 2 — Encore app (applies DB migrations automatically):
+Terminal 2 — Encore:
 
 ```bash
 encore run
 ```
 
-Encore connects to Temporal using `billing/config.cue` (`127.0.0.1:7233` when `#Meta.Environment.Cloud == "local"`), following the [Temporal + Encore guide](https://encore.dev/docs/go/how-to/temporal).
+API base URL: http://localhost:4000
 
-## API
+## Verify end-to-end
+
+With Temporal and Encore running:
 
 ```bash
-# 1. Create bill (starts Temporal workflow bill-<id>)
-curl -X POST http://localhost:4000/bills \
-  -H 'Content-Type: application/json' \
-  -d '{"customer_id":"cust_001","period_start":"2025-01-01","period_end":"2025-01-31","currency":"USD"}'
+chmod +x scripts/verify.sh
+./scripts/verify.sh
+```
 
-# 2. Add line items
-curl -X POST http://localhost:4000/bills/$BILL_ID/line-items \
+Or manually:
+
+```bash
+BILL_ID=$(curl -s -X POST http://localhost:4000/bills \
+  -H 'Content-Type: application/json' \
+  -d '{"customer_id":"cust_001","period_start":"2025-01-01","period_end":"2025-01-31","currency":"USD"}' \
+  | jq -r '.id // .details.bill_id // .details.bill.id')
+
+# On 409 conflict, id is in .details.bill_id (not top-level .id)
+if [ -z "$BILL_ID" ] || [ "$BILL_ID" = "null" ]; then
+  echo "error: could not get bill id" >&2
+  exit 1
+fi
+
+curl -X POST "http://localhost:4000/bills/$BILL_ID/line-items" \
   -H 'Content-Type: application/json' \
   -d '{"fee_type":"subscription","description":"Monthly plan","quantity":"1","unit_price":"99.00","effective_date":"2025-01-01","external_reference_id":"sub-jan-2025"}'
 
-curl -X POST http://localhost:4000/bills/$BILL_ID/line-items \
+curl -X POST "http://localhost:4000/bills/$BILL_ID/line-items" \
   -H 'Content-Type: application/json' \
   -d '{"fee_type":"usage","description":"API calls","quantity":"5000","unit_price":"0.001","effective_date":"2025-01-15","external_reference_id":"usage-jan-2025-api"}'
 
-# 3. Close bill (expected total: 104.00)
-curl -X POST http://localhost:4000/bills/$BILL_ID/close
-
-# 4. Get closed bill with line items
-curl http://localhost:4000/bills/$BILL_ID
+curl -X POST "http://localhost:4000/bills/$BILL_ID/close" | jq
+curl "http://localhost:4000/bills/$BILL_ID" | jq
 ```
 
-Temporal Web UI: http://localhost:8233 — workflow `bill-$BILL_ID` should show **Completed** after close.
+Check workflow `bill-$BILL_ID` is **Completed** in the Temporal UI.
+
+## Worker restart resilience
+
+1. Create a bill and add line items (do not close).
+2. Stop `encore run` (Ctrl+C).
+3. Restart `encore run` — the worker re-attaches to the same task queue.
+4. `POST /bills/:id/close` should still succeed; Temporal replays workflow history.
+
+## HTTP status codes
+
+| Code | When |
+|------|------|
+| 404 | Bill not found |
+| 409 | Duplicate bill (create) or duplicate close |
+| 422 | Line item on closed bill |
+| 400 | Validation error (invalid fee_type, period, UUID, etc.) |
+
+On duplicate bill create, the existing bill id is returned in `details.bill_id`.
 
 ## Tests
 
 ```bash
-go test ./...
+ENCORERUNTIME_NOPANIC=1 go test ./...
 encore test ./...
+```
+
+## Project layout
+
+```
+billing/     Encore service (API, DB, Temporal worker)
+workflow/    BillWorkflow definition
+activity/    ComputeTotal, UpdateBillClosed
+domain/      Pure types and errors
+money/       decimal ↔ money adapter
 ```

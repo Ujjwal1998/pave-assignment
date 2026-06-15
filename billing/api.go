@@ -12,6 +12,9 @@ import (
 
 //encore:api public method=GET path=/bills/:id
 func GetBill(ctx context.Context, id string) (*domain.Bill, error) {
+	if err := validateBillID(id); err != nil {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg(err.Error()).Err()
+	}
 	bill, err := loadBill(ctx, id)
 	if err != nil {
 		return nil, mapDomainErr(err)
@@ -31,7 +34,13 @@ func (s *Service) CreateBill(ctx context.Context, req *domain.CreateBillRequest)
 		return nil, mapDomainErr(err)
 	}
 	if !result.Created {
-		return nil, mapDomainErr(domain.ErrBillAlreadyExists)
+		return nil, errs.B().Code(errs.AlreadyExists).
+			Msg(domain.ErrBillAlreadyExists.Error()).
+			Details(BillAlreadyExistsDetails{
+				BillID: result.Bill.ID,
+				Bill:   result.Bill,
+			}).
+			Err()
 	}
 
 	run, err := s.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
@@ -56,6 +65,9 @@ func (s *Service) CreateBill(ctx context.Context, req *domain.CreateBillRequest)
 
 //encore:api public method=POST path=/bills/:id/close
 func (s *Service) CloseBill(ctx context.Context, id string) (*domain.CloseBillResponse, error) {
+	if err := validateBillID(id); err != nil {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg(err.Error()).Err()
+	}
 	bill, err := GetBillByID(ctx, id)
 	if err != nil {
 		return nil, mapDomainErr(err)
@@ -95,6 +107,9 @@ func (s *Service) CloseBill(ctx context.Context, id string) (*domain.CloseBillRe
 
 //encore:api public method=POST path=/bills/:id/line-items
 func AddLineItem(ctx context.Context, id string, req *domain.AddLineItemRequest) (*domain.LineItem, error) {
+	if err := validateBillID(id); err != nil {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg(err.Error()).Err()
+	}
 	bill, err := GetBillByID(ctx, id)
 	if err != nil {
 		return nil, mapDomainErr(err)
