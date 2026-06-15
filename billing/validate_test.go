@@ -1,8 +1,11 @@
 package billing
 
 import (
+	"errors"
 	"testing"
+	"time"
 
+	"github.com/govalues/decimal"
 	"pave-bank/domain"
 )
 
@@ -42,5 +45,77 @@ func TestParseCreateBillRequestInvalidCurrency(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestParseAddLineItemRequest(t *testing.T) {
+	bill := domain.Bill{
+		ID:          "bill-1",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	params, err := parseAddLineItemRequest(&domain.AddLineItemRequest{
+		FeeType:             domain.FeeTypeSubscription,
+		Description:         "Monthly plan",
+		Quantity:            "1",
+		UnitPrice:           "99.00",
+		EffectiveDate:       "2025-01-01",
+		ExternalReferenceID: "sub-jan-2025",
+	}, bill)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !params.TotalAmount.Equal(decimal.MustParse("99.00")) {
+		t.Fatalf("total = %s, want 99.00", params.TotalAmount)
+	}
+	if params.Currency != "USD" {
+		t.Fatalf("currency = %q, want USD", params.Currency)
+	}
+}
+
+func TestParseAddLineItemRequestOutOfPeriod(t *testing.T) {
+	bill := domain.Bill{
+		ID:          "bill-1",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	_, err := parseAddLineItemRequest(&domain.AddLineItemRequest{
+		FeeType:             domain.FeeTypeUsage,
+		Description:         "API calls",
+		Quantity:            "1",
+		UnitPrice:           "5.00",
+		EffectiveDate:       "2025-02-01",
+		ExternalReferenceID: "usage-feb",
+	}, bill)
+	if !errors.Is(err, domain.ErrLineItemOutOfPeriod) {
+		t.Fatalf("expected ErrLineItemOutOfPeriod, got %v", err)
+	}
+}
+
+func TestParseAddLineItemRequestDiscount(t *testing.T) {
+	bill := domain.Bill{
+		ID:          "bill-1",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	params, err := parseAddLineItemRequest(&domain.AddLineItemRequest{
+		FeeType:             domain.FeeTypeDiscount,
+		Description:         "Promo",
+		Quantity:            "1",
+		UnitPrice:           "-10.00",
+		EffectiveDate:       "2025-01-15",
+		ExternalReferenceID: "promo-jan",
+	}, bill)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !params.TotalAmount.Equal(decimal.MustParse("-10.00")) {
+		t.Fatalf("total = %s, want -10.00", params.TotalAmount)
 	}
 }
