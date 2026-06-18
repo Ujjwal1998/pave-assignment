@@ -26,10 +26,6 @@ type ComputeTotalResult struct {
 	Currency    string
 }
 
-type UpdateBillClosedInput struct {
-	BillID string
-}
-
 var store Store
 
 func Init(s Store) {

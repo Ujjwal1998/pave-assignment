@@ -165,32 +165,6 @@ func TestFinalizeBillTotalActivity(t *testing.T) {
 	}
 }
 
-func TestUpdateBillClosed(t *testing.T) {
-	mock := &mockStore{
-		currency: "USD",
-		amounts: []LineAmount{
-			{Amount: decimal.MustParse("42.00"), Currency: "USD"},
-		},
-	}
-	withStore(t, mock)
-
-	err := UpdateBillClosed(context.Background(), UpdateBillClosedInput{
-		BillID: "bill-1",
-	})
-	if err != nil {
-		t.Fatalf("UpdateBillClosed: %v", err)
-	}
-	if mock.ensuredClosingID != "bill-1" {
-		t.Fatalf("ensured closing bill id = %q", mock.ensuredClosingID)
-	}
-	if mock.closedID != "bill-1" {
-		t.Fatalf("closed bill id = %q", mock.closedID)
-	}
-	if !mock.closedAmt.Equal(decimal.MustParse("42.00")) {
-		t.Fatalf("closed total = %s, want 42.00", mock.closedAmt)
-	}
-}
-
 func TestUpdateAccrualTotal(t *testing.T) {
 	mock := &mockStore{currency: "USD"}
 	withStore(t, mock)
