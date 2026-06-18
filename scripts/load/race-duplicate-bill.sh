@@ -26,6 +26,8 @@ BODY=$(jq -n \
 
 echo "==> Scenario A: duplicate bill create (concurrency=$CONCURRENCY)"
 echo "    customer_id=$CUSTOMER_ID"
+load_log_responses_dir
+echo "    (set LOAD_VERBOSE=1 for full JSON bodies; KEEP_LOAD_ARTIFACTS=1 to retain files after exit)"
 
 _outfile() { echo "$LOAD_TMPDIR/resp-$1.json"; }
 
@@ -41,6 +43,7 @@ for ((i = 0; i < CONCURRENCY; i++)); do
 done
 wait
 
+echo "==> API responses"
 CREATED=0
 CONFLICT=0
 
@@ -48,6 +51,12 @@ for ((i = 0; i < CONCURRENCY; i++)); do
   f="$(_outfile "$i")"
   code=$(jq -r '.code // "ok"' < "$f")
   id=$(jq -r '.id // .details.bill_id // .details.bill.id // empty' < "$f")
+
+  # Log first success, first conflict, and last request; all if LOAD_VERBOSE=1 or CONCURRENCY<=5.
+  if [[ "${LOAD_VERBOSE:-}" == "1" || "$CONCURRENCY" -le 5 || "$i" -eq 0 || "$i" -eq 1 || "$i" -eq $((CONCURRENCY - 1)) ]]; then
+    load_log_saved_response "req-$i" "$f"
+  fi
+
   if [[ "$code" == "already_exists" ]]; then
     ((CONFLICT++)) || true
   elif [[ -n "$id" ]]; then
@@ -58,6 +67,10 @@ for ((i = 0; i < CONCURRENCY; i++)); do
     load_fail "unexpected create response"
   fi
 done
+
+if [[ "${LOAD_VERBOSE:-}" != "1" && "$CONCURRENCY" -gt 5 ]]; then
+  echo "    ... ($((CONCURRENCY - 3)) more responses in $LOAD_TMPDIR/resp-*.json)"
+fi
 
 UNIQUE_BILLS=$(jq -r '.id // .details.bill_id // .details.bill.id // empty' "$LOAD_TMPDIR"/resp-*.json | sort -u | grep -c . || true)
 echo "    created_responses=$CREATED conflict_responses=$CONFLICT unique_bill_ids=$UNIQUE_BILLS"

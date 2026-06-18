@@ -52,6 +52,7 @@ func (s *Service) CreateBill(ctx context.Context, req *domain.CreateBillRequest)
 		CustomerID:  result.Bill.CustomerID,
 		Currency:    result.Bill.Currency,
 		PeriodStart: result.Bill.PeriodStart,
+		PeriodEnd:   result.Bill.PeriodEnd,
 	})
 	if err != nil {
 		return nil, errs.B().Code(errs.Internal).Msg("failed to start bill workflow").Cause(err).Err()

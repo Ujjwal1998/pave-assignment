@@ -15,6 +15,28 @@ GET /bills/:id       → DB read (line items included while open and when closed
 - **Temporal** tracks progressive accrual via line-item signals; query `accrual` on workflow `bill-{id}` for live state.
 - **Worker** runs inside `encore run` on task queue `{env}-billing`.
 
+### Bill lifecycle (process-oriented)
+
+Each bill runs a long-lived Temporal workflow (`bill-{id}`) that tracks process phase:
+
+| Phase | Meaning |
+|-------|---------|
+| `waiting_period_start` | Bill created; workflow waiting until `period_start` |
+| `accruing` | Accepting line-item signals; running total updated |
+| `closing` | Close signal received; finalizing total |
+
+**Temporal queries** (while workflow is running):
+
+```bash
+temporal workflow query --workflow-id bill-{id} --name status
+temporal workflow query --workflow-id bill-{id} --name accrual
+```
+
+`status` returns phase, `accrual_total`, line item count, and period dates.  
+`accrual` returns the full in-memory accrual state including line item payloads.
+
+**API read model:** open bills expose `accrual_total` on `GET /bills/:id`, persisted by the workflow after each line-item signal. Closed bills use `total_amount`; `accrual_total` is cleared on finalize.
+
 ## Prerequisites
 
 ```bash
@@ -59,6 +81,14 @@ chmod +x scripts/verify.sh
 Or manually:
 
 ```bash
+./scripts/verify-discount.sh   # subscription + usage + discounts → correct close total
+./scripts/verify-multi-currency.sh   # USD bill + GEL line items → FX-converted close total
+./scripts/verify-accrual.sh          # accrual_total in DB matches Temporal status query
+```
+
+Or manually (full flow):
+
+```bash
 BILL_ID=$(curl -s -X POST http://localhost:4000/bills \
   -H 'Content-Type: application/json' \
   -d '{"customer_id":"cust_001","period_start":"2025-01-01","period_end":"2025-01-31","currency":"USD"}' \
@@ -101,6 +131,17 @@ Check workflow `bill-$BILL_ID` is **Completed** in the Temporal UI.
 | 400 | Validation error (invalid fee_type, period, UUID, etc.) |
 
 On duplicate bill create, the existing bill id is returned in `details.bill_id`.
+
+## Multi-currency line items
+
+- **Bill currency** is the invoice/settlement currency (e.g. `USD`). The close `total_amount` is always in this currency.
+- **Line item currency** is optional on `POST /bills/:id/line-items`; it defaults to the bill currency but may differ (e.g. `GEL` on a `USD` bill).
+- Line items keep their original amount and currency in storage and API responses.
+- At close, each line is converted to the bill currency using static rates in `money/rates.go` (currently **USD ↔ GEL**).
+
+Example: USD bill with `99 USD` subscription + `100 GEL` usage at `1 GEL = 0.37 USD` → close total **`136.00 USD`**.
+
+Unsupported currency pairs (e.g. EUR on a USD bill) return **400** when adding the line item.
 
 ## Tests
 

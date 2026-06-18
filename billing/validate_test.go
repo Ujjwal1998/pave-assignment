@@ -161,3 +161,53 @@ func TestParseAddLineItemRequestDiscount(t *testing.T) {
 		t.Fatalf("total = %s, want -10.00", params.TotalAmount)
 	}
 }
+
+func TestParseAddLineItemRequestForeignCurrencyOnBill(t *testing.T) {
+	bill := domain.Bill{
+		ID:          "bill-1",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	params, err := parseAddLineItemRequest(&domain.AddLineItemRequest{
+		FeeType:             domain.FeeTypeUsage,
+		Description:         "Local usage",
+		Quantity:            "1",
+		UnitPrice:           "100.00",
+		Currency:            "GEL",
+		EffectiveDate:       "2025-01-15",
+		ExternalReferenceID: "usage-gel",
+	}, bill)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if params.Currency != "GEL" {
+		t.Fatalf("currency = %q, want GEL", params.Currency)
+	}
+	if !params.TotalAmount.Equal(decimal.MustParse("100.00")) {
+		t.Fatalf("total = %s, want 100.00", params.TotalAmount)
+	}
+}
+
+func TestParseAddLineItemRequestUnsupportedCurrencyPair(t *testing.T) {
+	bill := domain.Bill{
+		ID:          "bill-1",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	_, err := parseAddLineItemRequest(&domain.AddLineItemRequest{
+		FeeType:             domain.FeeTypeUsage,
+		Description:         "EUR fee",
+		Quantity:            "1",
+		UnitPrice:           "10.00",
+		Currency:            "EUR",
+		EffectiveDate:       "2025-01-15",
+		ExternalReferenceID: "usage-eur",
+	}, bill)
+	if !errors.Is(err, domain.ErrUnsupportedCurrencyPair) {
+		t.Fatalf("expected ErrUnsupportedCurrencyPair, got %v", err)
+	}
+}

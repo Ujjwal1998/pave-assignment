@@ -21,7 +21,7 @@ var billingDB = sqldb.NewDatabase("billing", sqldb.DatabaseConfig{
 const (
 	billColumns = `
 		id, customer_id, period_start, period_end, currency,
-		status, total_amount, created_at, closed_at, workflow_run_id`
+		status, accrual_total, total_amount, created_at, closed_at, workflow_run_id`
 
 	lineItemColumns = `
 		id, bill_id, fee_type, description, quantity, unit_price,
@@ -149,13 +149,23 @@ func MarkBillClosedImmediate(ctx context.Context, billID string) (needsFinalizat
 	return false, domain.ErrBillNotFound
 }
 
-// FinalizeBillTotal writes the computed total onto an already-closed bill.
+// FinalizeBillTotal writes the computed total onto an already-closed bill and clears accrual_total.
 // Safe to call multiple times (idempotent on workflow retry).
 func FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error {
-	const query = `UPDATE bills SET total_amount = $2 WHERE id = $1 AND status = 'closed'`
+	const query = `UPDATE bills SET total_amount = $2, accrual_total = NULL WHERE id = $1 AND status = 'closed'`
 	_, err := billingDB.Exec(ctx, query, billID, totalAmount)
 	if err != nil {
 		return fmt.Errorf("finalize bill total: %w", err)
+	}
+	return nil
+}
+
+// UpdateAccrualTotal persists the workflow running total for an open bill.
+func UpdateAccrualTotal(ctx context.Context, billID string, accrualTotal decimal.Decimal) error {
+	const query = `UPDATE bills SET accrual_total = $2 WHERE id = $1 AND status = 'open'`
+	_, err := billingDB.Exec(ctx, query, billID, accrualTotal)
+	if err != nil {
+		return fmt.Errorf("update accrual total: %w", err)
 	}
 	return nil
 }
@@ -307,6 +317,7 @@ func scanBill(row rowScanner) (domain.Bill, error) {
 	var (
 		bill                                              domain.Bill
 		status                                            string
+		accrualTotal                                      sql.NullString
 		totalAmount                                       sql.NullString
 		closedAt                                          sql.NullTime
 	)
@@ -318,6 +329,7 @@ func scanBill(row rowScanner) (domain.Bill, error) {
 		&bill.PeriodEnd,
 		&bill.Currency,
 		&status,
+		&accrualTotal,
 		&totalAmount,
 		&bill.CreatedAt,
 		&closedAt,
@@ -328,6 +340,13 @@ func scanBill(row rowScanner) (domain.Bill, error) {
 	}
 
 	bill.Status = domain.BillStatus(status)
+	if accrualTotal.Valid {
+		amount, err := decimal.Parse(accrualTotal.String)
+		if err != nil {
+			return domain.Bill{}, fmt.Errorf("parse bill accrual total: %w", err)
+		}
+		bill.AccrualTotal = &amount
+	}
 	if totalAmount.Valid {
 		amount, err := decimal.Parse(totalAmount.String)
 		if err != nil {

@@ -14,6 +14,7 @@ type LineAmount struct {
 type Store interface {
 	ListLineItemAmounts(ctx context.Context, billID string) ([]LineAmount, error)
 	GetBillCurrency(ctx context.Context, billID string) (string, error)
+	UpdateAccrualTotal(ctx context.Context, billID string, accrualTotal decimal.Decimal) error
 	FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error
 }
 

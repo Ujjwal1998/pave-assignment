@@ -28,7 +28,7 @@ func mapDomainErr(err error) error {
 		return errs.B().Code(errs.AlreadyExists).Msg(err.Error()).Cause(err).Err()
 	case errors.Is(err, domain.ErrDuplicateLineItem):
 		return errs.B().Code(errs.AlreadyExists).Msg(err.Error()).Cause(err).Err()
-	case errors.Is(err, domain.ErrCurrencyMismatch),
+	case errors.Is(err, domain.ErrUnsupportedCurrencyPair),
 		errors.Is(err, domain.ErrLineItemOutOfPeriod),
 		errors.Is(err, domain.ErrInvalidDecimal):
 		return errs.B().Code(errs.InvalidArgument).Msg(err.Error()).Err()
@@ -46,7 +46,8 @@ func mapValidationErr(err error) error {
 	}
 	if errors.Is(err, domain.ErrInvalidFeeType) ||
 		errors.Is(err, domain.ErrLineItemOutOfPeriod) ||
-		errors.Is(err, domain.ErrInvalidDecimal) {
+		errors.Is(err, domain.ErrInvalidDecimal) ||
+		errors.Is(err, domain.ErrUnsupportedCurrencyPair) {
 		return mapDomainErr(err)
 	}
 	return errs.B().Code(errs.InvalidArgument).Msg(err.Error()).Err()

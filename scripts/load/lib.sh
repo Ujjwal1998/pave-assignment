@@ -15,7 +15,28 @@ load_init() {
 
 load_cleanup() {
   load_close_tracked_bills
+  if [[ "${KEEP_LOAD_ARTIFACTS:-}" == "1" ]]; then
+    echo "    kept response artifacts in $LOAD_TMPDIR"
+    return 0
+  fi
   rm -rf "$LOAD_TMPDIR"
+}
+
+# Print where per-request JSON responses are written.
+load_log_responses_dir() {
+  echo "    responses_dir=$LOAD_TMPDIR"
+}
+
+# Log one saved API response: path, HTTP-style code field, and key ids.
+load_log_saved_response() {
+  local label="$1" file="$2"
+  local code id
+  code=$(jq -r '.code // "ok"' < "$file")
+  id=$(jq -r '.id // .details.bill_id // .details.bill.id // empty' < "$file")
+  echo "    [$label] file=$file code=$code bill_id=${id:-<none>}"
+  if [[ "${LOAD_VERBOSE:-}" == "1" ]]; then
+    jq -c . < "$file" | sed 's/^/        /'
+  fi
 }
 
 # load_track_bill registers a bill for automatic close on script exit.
@@ -104,19 +125,50 @@ load_create_bill() {
 
 load_add_line_item() {
   local bill_id="$1" external_ref="$2" unit_price="${3:-1.00}" effective_date="${4:-2025-04-01}"
+  load_add_fee "$bill_id" "usage" "load test" "$external_ref" "1" "$unit_price" "$effective_date"
+}
+
+# Add a line item with explicit fee_type (subscription, usage, tax, penalty, discount).
+# Optional 8th argument: line item currency (defaults to bill currency on the server).
+load_add_fee() {
+  local bill_id="$1" fee_type="$2" description="$3" external_ref="$4" quantity="$5" unit_price="$6" effective_date="$7"
+  local currency="${8:-}"
   local body
-  body=$(jq -n \
-    --arg ref "$external_ref" \
-    --arg price "$unit_price" \
-    --arg date "$effective_date" \
-    '{
-      fee_type: "usage",
-      description: "load test",
-      quantity: "1",
-      unit_price: $price,
-      effective_date: $date,
-      external_reference_id: $ref
-    }')
+  if [[ -n "$currency" ]]; then
+    body=$(jq -n \
+      --arg ft "$fee_type" \
+      --arg desc "$description" \
+      --arg ref "$external_ref" \
+      --arg qty "$quantity" \
+      --arg price "$unit_price" \
+      --arg date "$effective_date" \
+      --arg cur "$currency" \
+      '{
+        fee_type: $ft,
+        description: $desc,
+        quantity: $qty,
+        unit_price: $price,
+        effective_date: $date,
+        external_reference_id: $ref,
+        currency: $cur
+      }')
+  else
+    body=$(jq -n \
+      --arg ft "$fee_type" \
+      --arg desc "$description" \
+      --arg ref "$external_ref" \
+      --arg qty "$quantity" \
+      --arg price "$unit_price" \
+      --arg date "$effective_date" \
+      '{
+        fee_type: $ft,
+        description: $desc,
+        quantity: $qty,
+        unit_price: $price,
+        effective_date: $date,
+        external_reference_id: $ref
+      }')
+  fi
   load_http_json POST "/bills/$bill_id/line-items" "$body"
 }
 

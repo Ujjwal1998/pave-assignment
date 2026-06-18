@@ -70,8 +70,16 @@ func parseAddLineItemRequest(req *domain.AddLineItemRequest, bill domain.Bill) (
 	if req.EffectiveDate == "" {
 		return InsertLineItemParams{}, fmt.Errorf("effective_date is required")
 	}
-	if req.Currency != "" && req.Currency != bill.Currency {
-		return InsertLineItemParams{}, domain.ErrCurrencyMismatch
+
+	lineCurrency := bill.Currency
+	if req.Currency != "" {
+		if err := money.ValidateCurrency(req.Currency); err != nil {
+			return InsertLineItemParams{}, err
+		}
+		lineCurrency = req.Currency
+	}
+	if !money.SupportsConversion(lineCurrency, bill.Currency) {
+		return InsertLineItemParams{}, domain.ErrUnsupportedCurrencyPair
 	}
 
 	quantity, err := parsePositiveDecimal(req.Quantity, "quantity")
@@ -103,7 +111,7 @@ func parseAddLineItemRequest(req *domain.AddLineItemRequest, bill domain.Bill) (
 		Quantity:            quantity,
 		UnitPrice:           unitPrice,
 		TotalAmount:         totalAmount,
-		Currency:            bill.Currency,
+		Currency:            lineCurrency,
 		EffectiveDate:       effectiveDate,
 		ExternalReferenceID: req.ExternalReferenceID,
 	}, nil

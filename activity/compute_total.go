@@ -14,7 +14,7 @@ func ComputeTotal(ctx context.Context, billID string) (ComputeTotalResult, error
 		return ComputeTotalResult{}, fmt.Errorf("activity store is not initialized")
 	}
 
-	currency, err := store.GetBillCurrency(ctx, billID)
+	billCurrency, err := store.GetBillCurrency(ctx, billID)
 	if err != nil {
 		return ComputeTotalResult{}, fmt.Errorf("get bill currency: %w", err)
 	}
@@ -24,13 +24,17 @@ func ComputeTotal(ctx context.Context, billID string) (ComputeTotalResult, error
 		return ComputeTotalResult{}, fmt.Errorf("list line item amounts: %w", err)
 	}
 
-	total, err := goMoney.NewAmountFromInt64(currency, 0, 0, 0)
+	total, err := goMoney.NewAmountFromInt64(billCurrency, 0, 0, 0)
 	if err != nil {
 		return ComputeTotalResult{}, fmt.Errorf("create zero amount: %w", err)
 	}
 
 	for _, row := range amounts {
-		lineAmt, err := money.ToAmount(row.Amount, row.Currency)
+		converted, err := money.Convert(row.Amount, row.Currency, billCurrency)
+		if err != nil {
+			return ComputeTotalResult{}, fmt.Errorf("convert line amount: %w", err)
+		}
+		lineAmt, err := money.ToAmount(converted, billCurrency)
 		if err != nil {
 			return ComputeTotalResult{}, fmt.Errorf("convert line amount: %w", err)
 		}

@@ -8,10 +8,12 @@ import (
 )
 
 type mockStore struct {
-	currency  string
-	amounts   []LineAmount
-	closedID  string
-	closedAmt decimal.Decimal
+	currency     string
+	amounts      []LineAmount
+	accrualID    string
+	accrualTotal decimal.Decimal
+	closedID     string
+	closedAmt    decimal.Decimal
 }
 
 func (m *mockStore) ListLineItemAmounts(context.Context, string) ([]LineAmount, error) {
@@ -20,6 +22,12 @@ func (m *mockStore) ListLineItemAmounts(context.Context, string) ([]LineAmount, 
 
 func (m *mockStore) GetBillCurrency(context.Context, string) (string, error) {
 	return m.currency, nil
+}
+
+func (m *mockStore) UpdateAccrualTotal(_ context.Context, billID string, total decimal.Decimal) error {
+	m.accrualID = billID
+	m.accrualTotal = total
+	return nil
 }
 
 func (m *mockStore) FinalizeBillTotal(_ context.Context, billID string, total decimal.Decimal) error {
@@ -55,6 +63,24 @@ func TestComputeTotalSumsLineItems(t *testing.T) {
 	}
 }
 
+func TestComputeTotalMixedCurrency(t *testing.T) {
+	withStore(t, &mockStore{
+		currency: "USD",
+		amounts: []LineAmount{
+			{Amount: decimal.MustParse("99.00"), Currency: "USD"},
+			{Amount: decimal.MustParse("100.00"), Currency: "GEL"},
+		},
+	})
+
+	result, err := ComputeTotal(context.Background(), "bill-1")
+	if err != nil {
+		t.Fatalf("ComputeTotal: %v", err)
+	}
+	if !result.TotalAmount.Equal(decimal.MustParse("136.00")) {
+		t.Fatalf("total = %s, want 136.00", result.TotalAmount)
+	}
+}
+
 func TestComputeTotalEmptyBill(t *testing.T) {
 	withStore(t, &mockStore{currency: "USD"})
 
@@ -87,5 +113,24 @@ func TestUpdateBillClosed(t *testing.T) {
 	}
 	if !mock.closedAmt.Equal(decimal.MustParse("42.00")) {
 		t.Fatalf("closed total = %s, want 42.00", mock.closedAmt)
+	}
+}
+
+func TestUpdateAccrualTotal(t *testing.T) {
+	mock := &mockStore{currency: "USD"}
+	withStore(t, mock)
+
+	err := UpdateAccrualTotal(context.Background(), UpdateAccrualTotalInput{
+		BillID:       "bill-1",
+		AccrualTotal: "104.00",
+	})
+	if err != nil {
+		t.Fatalf("UpdateAccrualTotal: %v", err)
+	}
+	if mock.accrualID != "bill-1" {
+		t.Fatalf("accrual bill id = %q", mock.accrualID)
+	}
+	if !mock.accrualTotal.Equal(decimal.MustParse("104.00")) {
+		t.Fatalf("accrual total = %s, want 104.00", mock.accrualTotal)
 	}
 }

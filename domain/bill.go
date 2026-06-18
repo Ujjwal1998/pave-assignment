@@ -20,6 +20,7 @@ type Bill struct {
 	PeriodEnd     time.Time        `json:"period_end"`
 	Currency      string           `json:"currency"`
 	Status        BillStatus       `json:"status"`
+	AccrualTotal  *decimal.Decimal `json:"accrual_total,omitempty"`
 	TotalAmount   *decimal.Decimal `json:"total_amount,omitempty"`
 	CreatedAt     time.Time        `json:"created_at"`
 	ClosedAt      *time.Time       `json:"closed_at,omitempty"`

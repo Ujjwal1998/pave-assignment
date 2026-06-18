@@ -31,6 +31,7 @@ func initService() (*Service, error) {
 	w := worker.New(tc, queue, worker.Options{})
 	w.RegisterWorkflow(workflow.BillWorkflow)
 	w.RegisterActivity(activity.UpdateBillClosed)
+	w.RegisterActivity(activity.UpdateAccrualTotal)
 
 	if err := w.Start(); err != nil {
 		tc.Close()

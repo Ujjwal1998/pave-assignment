@@ -1,0 +1,1 @@
+ALTER TABLE bills ADD COLUMN IF NOT EXISTS accrual_total NUMERIC(19,9);

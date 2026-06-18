@@ -25,6 +25,10 @@ func (activityStore) GetBillCurrency(ctx context.Context, billID string) (string
 	return bill.Currency, nil
 }
 
+func (activityStore) UpdateAccrualTotal(ctx context.Context, billID string, accrualTotal decimal.Decimal) error {
+	return UpdateAccrualTotal(ctx, billID, accrualTotal)
+}
+
 func (activityStore) FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error {
 	return FinalizeBillTotal(ctx, billID, totalAmount)
 }
