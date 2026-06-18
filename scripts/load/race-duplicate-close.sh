@@ -17,13 +17,14 @@ CUSTOMER_ID="${CUSTOMER_ID:-cust-race-close-$(date +%s)}"
 echo "==> Scenario E: duplicate close (concurrency=$CONCURRENCY)"
 load_log_responses_dir
 
-BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "USD")
+load_ensure_open_period
+BILL_ID=$(load_create_open_bill "$CUSTOMER_ID" "USD")
 load_track_bill "$BILL_ID"
 echo "    bill_id=$BILL_ID"
 
-ADD1=$(load_add_line_item "$BILL_ID" "sub-1" "50.00" "2025-05-01")
+ADD1=$(load_add_line_item "$BILL_ID" "sub-1" "50.00" "$PERIOD_START")
 load_log_json_response "setup add sub-1" "$ADD1"
-ADD2=$(load_add_line_item "$BILL_ID" "sub-2" "25.00" "2025-05-02")
+ADD2=$(load_add_line_item "$BILL_ID" "sub-2" "25.00" "$EFFECTIVE")
 load_log_json_response "setup add sub-2" "$ADD2"
 
 _outfile() { echo "$LOAD_TMPDIR/close-$1"; }
@@ -32,8 +33,7 @@ _bodyfile() { echo "$LOAD_TMPDIR/close-body-$1.json"; }
 _race_close() {
   local i="$1"
   local body
-  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close?wait=true")
-  echo "$(load_last_http_code)" > "$(_outfile "$i")"
+  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close?wait=true" "" "$(_outfile "$i")")
   echo "$body" > "$(_bodyfile "$i")"
 }
 

@@ -18,7 +18,8 @@ EXTERNAL_REF="${EXTERNAL_REF:-dup-ref-$(date +%s)}"
 echo "==> Scenario C: duplicate external_reference_id (concurrency=$CONCURRENCY)"
 load_log_responses_dir
 
-BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "USD")
+load_ensure_open_period
+BILL_ID=$(load_create_open_bill "$CUSTOMER_ID" "USD")
 load_track_bill "$BILL_ID"
 echo "    bill_id=$BILL_ID"
 echo "    external_reference_id=$EXTERNAL_REF"
@@ -27,7 +28,7 @@ _outfile() { echo "$LOAD_TMPDIR/resp-$1.json"; }
 
 _race_add() {
   local i="$1"
-  load_add_line_item "$BILL_ID" "$EXTERNAL_REF" "42.00" "2025-05-01" > "$(_outfile "$i")"
+  load_add_line_item "$BILL_ID" "$EXTERNAL_REF" "42.00" "$PERIOD_START" > "$(_outfile "$i")"
 }
 
 for ((i = 0; i < CONCURRENCY; i++)); do

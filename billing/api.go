@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 
 	"encore.dev/beta/errs"
 	"go.temporal.io/sdk/client"
@@ -104,6 +105,9 @@ func (s *Service) AddLineItem(ctx context.Context, id string, req *domain.AddLin
 
 	item, err := waitForLineItem(ctx, id, params.ExternalReferenceID)
 	if err != nil {
+		if errors.Is(err, domain.ErrBillAlreadyClosed) || errors.Is(err, domain.ErrBillNotYetOpen) {
+			return nil, mapDomainErr(err)
+		}
 		return nil, errs.B().Code(errs.Internal).Msg("line item not persisted by workflow").Cause(err).Err()
 	}
 

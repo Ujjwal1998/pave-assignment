@@ -182,6 +182,9 @@ func ActivateBill(ctx context.Context, billID string) error {
 // EnsureBillClosing idempotently moves an open bill to closing (used by auto-close).
 func EnsureBillClosing(ctx context.Context, billID string) error {
 	_, err := MarkBillClosing(ctx, billID)
+	if errors.Is(err, domain.ErrBillAlreadyClosed) {
+		return nil
+	}
 	return err
 }
 

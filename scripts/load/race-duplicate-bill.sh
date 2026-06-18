@@ -13,9 +13,9 @@ trap load_cleanup EXIT
 
 CONCURRENCY="${CONCURRENCY:-50}"
 CUSTOMER_ID="${CUSTOMER_ID:-cust-race-bill-$(date +%s)}"
-PERIOD_START="${PERIOD_START:-2025-05-01}"
-PERIOD_END="${PERIOD_END:-2025-05-31}"
 CURRENCY="${CURRENCY:-USD}"
+
+load_ensure_open_period
 
 BODY=$(jq -n \
   --arg c "$CUSTOMER_ID" \

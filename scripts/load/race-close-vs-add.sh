@@ -19,7 +19,8 @@ RUN_ID="${RUN_ID:-$(date +%s)}"
 echo "==> Scenario D1: close vs concurrent adds (adds=$ADDS)"
 load_log_responses_dir
 
-BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "USD")
+load_ensure_open_period
+BILL_ID=$(load_create_open_bill "$CUSTOMER_ID" "USD")
 load_track_bill "$BILL_ID"
 echo "    bill_id=$BILL_ID"
 
@@ -27,7 +28,7 @@ _race_add() {
   local i="$1"
   local ref="race-${RUN_ID}-${i}"
   local body id
-  body=$(load_add_line_item "$BILL_ID" "$ref" "2.50" "2025-05-08" 2>/dev/null || echo '{}')
+  body=$(load_add_line_item "$BILL_ID" "$ref" "2.50" "$EFFECTIVE" 2>/dev/null || echo '{}')
   echo "$body" > "$LOAD_TMPDIR/add-body-$i.json"
   id=$(echo "$body" | jq -r '.id // empty')
   if [[ -n "$id" ]]; then
@@ -39,8 +40,7 @@ _race_add() {
 
 _race_close() {
   local body
-  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close?wait=true")
-  echo "$(load_last_http_code)" > "$LOAD_TMPDIR/close-status"
+  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close?wait=true" "" "$LOAD_TMPDIR/close-status")
   echo "$body" > "$LOAD_TMPDIR/close-body.json"
 }
 

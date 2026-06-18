@@ -18,7 +18,8 @@ RUN_ID="${RUN_ID:-$(date +%s)}"
 echo "==> Scenario B: concurrent unique line items (concurrency=$CONCURRENCY)"
 load_log_responses_dir
 
-BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "GEL")
+load_ensure_open_period
+BILL_ID=$(load_create_open_bill "$CUSTOMER_ID" "GEL")
 load_track_bill "$BILL_ID"
 echo "    bill_id=$BILL_ID"
 
@@ -27,7 +28,7 @@ _outfile() { echo "$LOAD_TMPDIR/resp-$1.json"; }
 _race_add() {
   local i="$1"
   local ref="usage-${RUN_ID}-${i}"
-  load_add_line_item "$BILL_ID" "$ref" "1.00" "2025-05-10" > "$(_outfile "$i")"
+  load_add_line_item "$BILL_ID" "$ref" "1.00" "$EFFECTIVE" > "$(_outfile "$i")"
 }
 
 for ((i = 0; i < CONCURRENCY; i++)); do

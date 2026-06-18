@@ -17,11 +17,12 @@ CUSTOMER_ID="${CUSTOMER_ID:-cust-race-after-close-$(date +%s)}"
 echo "==> Scenario D2: add after close (concurrency=$CONCURRENCY)"
 load_log_responses_dir
 
-BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "USD")
+load_ensure_open_period
+BILL_ID=$(load_create_open_bill "$CUSTOMER_ID" "USD")
 load_track_bill "$BILL_ID"
 echo "    bill_id=$BILL_ID"
 
-SETUP_ADD=$(load_add_line_item "$BILL_ID" "only-item" "10.00" "2025-05-01")
+SETUP_ADD=$(load_add_line_item "$BILL_ID" "only-item" "10.00" "$PERIOD_START")
 load_log_json_response "setup add" "$SETUP_ADD"
 SETUP_CLOSE=$(load_close_bill "$BILL_ID")
 load_log_json_response "setup close" "$SETUP_CLOSE"
@@ -34,7 +35,7 @@ _reject_add() {
   local body
   body=$(load_http_json_with_status POST "/bills/$BILL_ID/line-items" "$(jq -n \
     --arg ref "after-close-$i" \
-    --arg date "2025-05-05" \
+    --arg date "$EFFECTIVE" \
     '{
       fee_type: "usage",
       description: "load test",
@@ -42,8 +43,7 @@ _reject_add() {
       unit_price: "99.00",
       effective_date: $date,
       external_reference_id: $ref
-    }')")
-  echo "$(load_last_http_code)" > "$LOAD_TMPDIR/status-$i"
+    }')" "$LOAD_TMPDIR/status-$i")
   echo "$body" > "$LOAD_TMPDIR/body-$i.json"
 }
 

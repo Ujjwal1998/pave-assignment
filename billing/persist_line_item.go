@@ -73,17 +73,21 @@ func parsePersistLineItemInput(ctx context.Context, input activity.PersistLineIt
 
 // waitForLineItem polls until the workflow persists a line item (Phase 4 read-after-signal).
 func waitForLineItem(ctx context.Context, billID, externalRef string) (domain.LineItem, error) {
-	const maxTries = 50
+	const maxTries = 300
 	for i := 0; i < maxTries; i++ {
 		item, err := getLineItemByExternalRef(ctx, billID, externalRef)
 		if err == nil {
 			return item, nil
 		}
+		bill, billErr := GetBillByID(ctx, billID)
+		if billErr == nil && bill.Status != domain.BillStatusOpen {
+			return domain.LineItem{}, domain.ErrBillAlreadyClosed
+		}
 		// getLineItemByExternalRef returns ErrDuplicateLineItem when the row is not found yet.
 		select {
 		case <-ctx.Done():
 			return domain.LineItem{}, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 	return domain.LineItem{}, fmt.Errorf("line item %q not persisted in time", externalRef)

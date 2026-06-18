@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"encore.dev"
 	"encore.dev/beta/errs"
@@ -68,22 +69,13 @@ func (s *Service) FinalizeBill(ctx context.Context, id string) (*domain.CloseBil
 }
 
 func (s *Service) requestClose(ctx context.Context, id string, wait bool) (*closeOutcome, error) {
-	needsFinalization, err := MarkBillClosing(ctx, id)
-	if err != nil {
+	if _, err := MarkBillClosing(ctx, id); err != nil {
 		return nil, err
 	}
+	return s.signalAndWaitClose(ctx, id, wait)
+}
 
-	if needsFinalization {
-		if err := finalizeBillTotal(ctx, id); err != nil {
-			return nil, err
-		}
-		resp, err := buildCloseBillResponse(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		return &closeOutcome{Closed: resp}, nil
-	}
-
+func (s *Service) signalAndWaitClose(ctx context.Context, id string, wait bool) (*closeOutcome, error) {
 	if err := s.signalClose(ctx, id); err != nil {
 		return nil, err
 	}
@@ -96,7 +88,9 @@ func (s *Service) requestClose(ctx context.Context, id string, wait bool) (*clos
 	}
 
 	if err := s.waitForCloseWorkflow(ctx, id); err != nil {
-		return nil, err
+		if err := s.waitForBillClosed(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 	resp, err := buildCloseBillResponse(ctx, id)
 	if err != nil {
@@ -118,6 +112,25 @@ func (s *Service) waitForCloseWorkflow(ctx context.Context, id string) error {
 		return errs.B().Code(errs.Internal).Msg("bill close workflow failed").Cause(err).Err()
 	}
 	return nil
+}
+
+func (s *Service) waitForBillClosed(ctx context.Context, id string) error {
+	const maxTries = 100
+	for i := 0; i < maxTries; i++ {
+		bill, err := GetBillByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if bill.Status == domain.BillStatusClosed && bill.TotalAmount != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return errs.B().Code(errs.Internal).Msg("bill did not close in time").Err()
 }
 
 func buildCloseBillResponse(ctx context.Context, id string) (*domain.CloseBillResponse, error) {

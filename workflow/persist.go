@@ -33,6 +33,7 @@ func accrualItemFromResult(result activity.PersistLineItemResult) LineItemSignal
 }
 
 // persistAndAccrue runs PersistLineItem then updates in-memory accrual and DB accrual_total.
+// When the bill is frozen mid-flight (close race), the persist is skipped without failing the workflow.
 func persistAndAccrue(
 	ctx workflow.Context,
 	activityCtx workflow.Context,
@@ -42,6 +43,9 @@ func persistAndAccrue(
 ) error {
 	var result activity.PersistLineItemResult
 	if err := workflow.ExecuteActivity(activityCtx, activity.PersistLineItem, persistInput(billID, sig)).Get(activityCtx, &result); err != nil {
+		if isLineItemPersistRejected(err) {
+			return nil
+		}
 		return err
 	}
 

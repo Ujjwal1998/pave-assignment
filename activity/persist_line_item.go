@@ -2,8 +2,13 @@ package activity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"go.temporal.io/sdk/temporal"
+
+	"pave-bank/domain"
 )
 
 type PersistLineItemInput struct {
@@ -32,5 +37,14 @@ func PersistLineItem(ctx context.Context, input PersistLineItemInput) (PersistLi
 	if store == nil {
 		return PersistLineItemResult{}, fmt.Errorf("activity store is not initialized")
 	}
-	return store.PersistLineItem(ctx, input)
+	result, err := store.PersistLineItem(ctx, input)
+	if err != nil {
+		if errors.Is(err, domain.ErrBillAlreadyClosed) || errors.Is(err, domain.ErrBillNotYetOpen) {
+			return PersistLineItemResult{}, temporal.NewNonRetryableApplicationError(
+				err.Error(), "BillFrozen", err,
+			)
+		}
+		return PersistLineItemResult{}, err
+	}
+	return result, nil
 }

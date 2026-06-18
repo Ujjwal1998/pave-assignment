@@ -95,7 +95,7 @@ load_log_json_response() {
 # HTTP request that captures status code and prints the body.
 # Status is persisted to LOAD_TMPDIR/load-last-http-code so it survives $(...) subshells.
 load_http_json_with_status() {
-  local method="$1" path="$2" body="${3:-}"
+  local method="$1" path="$2" body="${3:-}" code_out="${4:-}"
   local tmp code_file
   mkdir -p "${LOAD_TMPDIR:-/tmp}"
   code_file="${LOAD_TMPDIR:-/tmp}/load-last-http-code"
@@ -106,7 +106,11 @@ load_http_json_with_status() {
   else
     LOAD_LAST_HTTP_CODE=$(curl -s -o "$tmp" -w '%{http_code}' -X "$method" "$BASE_URL$path")
   fi
-  echo "$LOAD_LAST_HTTP_CODE" >"$code_file"
+  if [[ -n "$code_out" ]]; then
+    echo "$LOAD_LAST_HTTP_CODE" >"$code_out"
+  else
+    echo "$LOAD_LAST_HTTP_CODE" >"$code_file"
+  fi
   cat "$tmp"
   rm -f "$tmp"
 }
@@ -181,6 +185,22 @@ PY
 EOF
 }
 
+# Default load-test period to the current UTC month unless PERIOD_START is set.
+load_ensure_open_period() {
+  if [[ -n "${PERIOD_START:-}" ]]; then
+    PERIOD_END="${PERIOD_END:-$(load_period_end_from_start "$PERIOD_START")}"
+    EFFECTIVE="${EFFECTIVE:-$(load_effective_from_start "$PERIOD_START")}"
+    return 0
+  fi
+  load_set_open_period
+}
+
+load_create_open_bill() {
+  local customer_id="$1" currency="${2:-USD}"
+  load_ensure_open_period
+  load_create_bill "$customer_id" "$PERIOD_START" "$PERIOD_END" "$currency"
+}
+
 load_period_end_from_start() {
   python3 - "$1" <<'PY'
 from datetime import date, timedelta
@@ -245,7 +265,11 @@ load_create_bill() {
 }
 
 load_add_line_item() {
-  local bill_id="$1" external_ref="$2" unit_price="${3:-1.00}" effective_date="${4:-2025-04-01}"
+  local bill_id="$1" external_ref="$2" unit_price="${3:-1.00}" effective_date="${4:-}"
+  if [[ -z "$effective_date" ]]; then
+    load_ensure_open_period
+    effective_date="$EFFECTIVE"
+  fi
   load_add_fee "$bill_id" "usage" "load test" "$external_ref" "1" "$unit_price" "$effective_date"
 }
 
