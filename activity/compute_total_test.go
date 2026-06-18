@@ -30,6 +30,14 @@ func (m *mockStore) UpdateAccrualTotal(_ context.Context, billID string, total d
 	return nil
 }
 
+func (m *mockStore) ActivateBill(context.Context, string) error {
+	return nil
+}
+
+func (m *mockStore) EnsureBillClosing(context.Context, string) error {
+	return nil
+}
+
 func (m *mockStore) FinalizeBillTotal(_ context.Context, billID string, total decimal.Decimal) error {
 	m.closedID = billID
 	m.closedAmt = total

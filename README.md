@@ -19,11 +19,14 @@ GET /bills/:id       → DB read (line items included while open and when closed
 
 Each bill runs a long-lived Temporal workflow (`bill-{id}`) that tracks process phase:
 
-| Phase | Meaning |
-|-------|---------|
-| `waiting_period_start` | Bill created; workflow waiting until `period_start` |
-| `accruing` | Accepting line-item signals; running total updated |
-| `closing` | Close signal received; finalizing total |
+| DB status | Workflow phase | Meaning |
+|-----------|----------------|---------|
+| `scheduled` | `waiting_period_start` | Bill created; waiting until `period_start` |
+| `open` | `accruing` | Accepting line items; `accrual_total` updated |
+| `closing` | `closing` | Close in progress; line items frozen |
+| `closed` | (workflow completed) | Final `total_amount` set |
+
+Line items are accepted only while status is **`open`**. Bills with a future `period_start` are created as **`scheduled`** and activated by the workflow at period start.
 
 **Temporal queries** (while workflow is running):
 
@@ -84,6 +87,7 @@ Or manually:
 ./scripts/verify-discount.sh   # subscription + usage + discounts → correct close total
 ./scripts/verify-multi-currency.sh   # USD bill + GEL line items → FX-converted close total
 ./scripts/verify-accrual.sh          # accrual_total in DB matches Temporal status query
+./scripts/verify-lifecycle.sh        # scheduled bills reject line items until period start
 ```
 
 Or manually (full flow):
@@ -169,7 +173,10 @@ go test -tags=integration ./tests/integration/ -run TestRace -v -count=1
 ```
 billing/     Encore service (API, DB, Temporal worker)
 workflow/    BillWorkflow definition
-activity/    ComputeTotal, UpdateBillClosed
+activity/    ComputeTotal, UpdateBillClosed, UpdateAccrualTotal, ActivateBill
 domain/      Pure types and errors
-money/       decimal ↔ money adapter
+money/       decimal ↔ money adapter, FX conversion
+docs/        Architecture and data model reference
 ```
+
+See [docs/datamodels.md](docs/datamodels.md) for bill/line-item schemas, lifecycle states, and Temporal mapping.

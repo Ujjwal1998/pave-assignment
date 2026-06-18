@@ -9,8 +9,10 @@ import (
 type BillStatus string
 
 const (
-	BillStatusOpen   BillStatus = "open"
-	BillStatusClosed BillStatus = "closed"
+	BillStatusScheduled BillStatus = "scheduled"
+	BillStatusOpen      BillStatus = "open"
+	BillStatusClosing   BillStatus = "closing"
+	BillStatusClosed    BillStatus = "closed"
 )
 
 type Bill struct {

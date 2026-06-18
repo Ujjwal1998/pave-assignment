@@ -75,7 +75,7 @@ func (s *Service) CloseBill(ctx context.Context, id string) (*domain.CloseBillRe
 	// Atomically freeze the bill in the DB before touching the workflow.
 	// This prevents concurrent AddLineItem calls from inserting new rows while
 	// the workflow is computing the total.
-	needsFinalization, err := MarkBillClosedImmediate(ctx, id)
+	needsFinalization, err := MarkBillClosing(ctx, id)
 	if err != nil {
 		return nil, mapDomainErr(err)
 	}
@@ -144,8 +144,13 @@ func (s *Service) AddLineItem(ctx context.Context, id string, req *domain.AddLin
 	if err != nil {
 		return nil, mapDomainErr(err)
 	}
-	if bill.Status == domain.BillStatusClosed {
-		return nil, mapDomainErr(domain.ErrBillAlreadyClosed)
+	if bill.Status != domain.BillStatusOpen {
+		switch bill.Status {
+		case domain.BillStatusScheduled:
+			return nil, mapDomainErr(domain.ErrBillNotYetOpen)
+		default:
+			return nil, mapDomainErr(domain.ErrBillAlreadyClosed)
+		}
 	}
 
 	params, err := parseAddLineItemRequest(req, bill)

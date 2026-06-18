@@ -10,12 +10,25 @@ import (
 )
 
 func BillWorkflow(ctx workflow.Context, input Input) error {
+	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 5,
+			InitialInterval: time.Second,
+		},
+	})
+
 	phase := PhaseAccruing
 	if !input.PeriodStart.IsZero() {
 		now := workflow.Now(ctx)
 		if input.PeriodStart.After(now) {
 			phase = PhaseWaitingPeriodStart
 			if err := workflow.NewTimer(ctx, input.PeriodStart.Sub(now)).Get(ctx, nil); err != nil {
+				return err
+			}
+			if err := workflow.ExecuteActivity(activityCtx, activity.ActivateBill, activity.ActivateBillInput{
+				BillID: input.BillID,
+			}).Get(activityCtx, nil); err != nil {
 				return err
 			}
 			phase = PhaseAccruing
@@ -39,16 +52,9 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 		return err
 	}
 
-	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Second,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 5,
-			InitialInterval: time.Second,
-		},
-	})
-
 	lineItemCh := workflow.GetSignalChannel(ctx, LineItemSignalName)
 	closeCh := workflow.GetSignalChannel(ctx, CloseSignalName)
+	autoCloseAt := autoCloseTime(input.PeriodEnd)
 
 	for {
 		selector := workflow.NewSelector(ctx)
@@ -66,6 +72,19 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 			c.Receive(ctx, &closeSig)
 			closed = true
 		})
+
+		if !autoCloseAt.IsZero() && phase == PhaseAccruing {
+			now := workflow.Now(ctx)
+			if !autoCloseAt.After(now) {
+				closed = true
+			} else {
+				timerFuture := workflow.NewTimer(ctx, autoCloseAt.Sub(now))
+				selector.AddFuture(timerFuture, func(f workflow.Future) {
+					_ = f.Get(ctx, nil)
+					closed = true
+				})
+			}
+		}
 
 		selector.Select(ctx)
 
@@ -87,4 +106,13 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 	return workflow.ExecuteActivity(activityCtx, activity.UpdateBillClosed, activity.UpdateBillClosedInput{
 		BillID: input.BillID,
 	}).Get(activityCtx, nil)
+}
+
+// autoCloseTime returns the instant after period_end when the bill should auto-close.
+func autoCloseTime(periodEnd time.Time) time.Time {
+	if periodEnd.IsZero() {
+		return time.Time{}
+	}
+	end := periodEnd.UTC()
+	return time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
 }

@@ -58,9 +58,11 @@ type InsertLineItemResult struct {
 }
 
 func CreateBillRecord(ctx context.Context, params CreateBillParams) (CreateBillResult, error) {
+	initialStatus := initialBillStatus(params.PeriodStart)
+
 	const query = `
-		INSERT INTO bills (customer_id, period_start, period_end, currency)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO bills (customer_id, period_start, period_end, currency, status)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (customer_id, period_start, period_end, currency) DO NOTHING
 		RETURNING` + billColumns
 
@@ -69,6 +71,7 @@ func CreateBillRecord(ctx context.Context, params CreateBillParams) (CreateBillR
 		params.PeriodStart,
 		params.PeriodEnd,
 		params.Currency,
+		string(initialStatus),
 	)
 
 	bill, err := scanBill(row)
@@ -113,17 +116,17 @@ func UpdateWorkflowRunID(ctx context.Context, billID, workflowRunID string) erro
 	return nil
 }
 
-// MarkBillClosedImmediate atomically transitions the bill from open to closed,
-// freezing line items immediately so concurrent AddLineItem calls are rejected.
+// MarkBillClosing transitions an open bill to closing, freezing new line items.
 // total_amount is left NULL; the workflow fills it via FinalizeBillTotal.
 //
-// Returns (needsFinalization=true, nil) when the bill is already closed but
-// has no total yet (workflow died mid-close) — caller should re-run finalization.
+// Returns (needsFinalization=true, nil) when the bill is already closing/closed but
+// has no total yet — caller should re-run finalization.
 // Returns (false, ErrBillAlreadyClosed) when the bill is fully closed.
-func MarkBillClosedImmediate(ctx context.Context, billID string) (needsFinalization bool, err error) {
+// Returns (false, ErrBillNotYetOpen) when the bill is still scheduled.
+func MarkBillClosing(ctx context.Context, billID string) (needsFinalization bool, err error) {
 	const query = `
 		UPDATE bills
-		SET status = 'closed', closed_at = now()
+		SET status = 'closing', closed_at = now()
 		WHERE id = $1 AND status = 'open'
 		RETURNING id`
 
@@ -133,26 +136,61 @@ func MarkBillClosedImmediate(ctx context.Context, billID string) (needsFinalizat
 		return false, nil
 	}
 	if !errors.Is(scanErr, sqldb.ErrNoRows) {
-		return false, fmt.Errorf("mark bill closed immediate: %w", scanErr)
+		return false, fmt.Errorf("mark bill closing: %w", scanErr)
 	}
 
 	bill, err := GetBillByID(ctx, billID)
 	if err != nil {
 		return false, err
 	}
-	if bill.Status == domain.BillStatusClosed && bill.TotalAmount == nil {
+	if bill.Status == domain.BillStatusScheduled {
+		return false, domain.ErrBillNotYetOpen
+	}
+	if (bill.Status == domain.BillStatusClosing || bill.Status == domain.BillStatusClosed) && bill.TotalAmount == nil {
 		return true, nil
 	}
-	if bill.Status == domain.BillStatusClosed {
+	if bill.Status == domain.BillStatusClosing || bill.Status == domain.BillStatusClosed {
 		return false, domain.ErrBillAlreadyClosed
 	}
 	return false, domain.ErrBillNotFound
 }
 
-// FinalizeBillTotal writes the computed total onto an already-closed bill and clears accrual_total.
-// Safe to call multiple times (idempotent on workflow retry).
+// ActivateBill transitions a scheduled bill to open when its accrual period begins.
+func ActivateBill(ctx context.Context, billID string) error {
+	const query = `
+		UPDATE bills
+		SET status = 'open'
+		WHERE id = $1 AND status = 'scheduled'`
+
+	result, err := billingDB.Exec(ctx, query, billID)
+	if err != nil {
+		return fmt.Errorf("activate bill: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		bill, err := GetBillByID(ctx, billID)
+		if err != nil {
+			return err
+		}
+		if bill.Status == domain.BillStatusOpen {
+			return nil
+		}
+		return fmt.Errorf("activate bill: bill %s is %s", billID, bill.Status)
+	}
+	return nil
+}
+
+// EnsureBillClosing idempotently moves an open bill to closing (used by auto-close).
+func EnsureBillClosing(ctx context.Context, billID string) error {
+	_, err := MarkBillClosing(ctx, billID)
+	return err
+}
+
+// FinalizeBillTotal writes the computed total and transitions closing → closed.
 func FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error {
-	const query = `UPDATE bills SET total_amount = $2, accrual_total = NULL WHERE id = $1 AND status = 'closed'`
+	const query = `
+		UPDATE bills
+		SET status = 'closed', total_amount = $2, accrual_total = NULL
+		WHERE id = $1 AND status IN ('closing', 'closed')`
 	_, err := billingDB.Exec(ctx, query, billID, totalAmount)
 	if err != nil {
 		return fmt.Errorf("finalize bill total: %w", err)
@@ -385,4 +423,15 @@ func scanLineItem(row rowScanner) (domain.LineItem, error) {
 
 	item.FeeType = domain.FeeType(feeType)
 	return item, nil
+}
+
+func initialBillStatus(periodStart time.Time) domain.BillStatus {
+	start := periodStart.UTC()
+	startDate := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if startDate.After(today) {
+		return domain.BillStatusScheduled
+	}
+	return domain.BillStatusOpen
 }

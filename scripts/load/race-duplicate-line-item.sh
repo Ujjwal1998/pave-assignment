@@ -16,6 +16,7 @@ CUSTOMER_ID="${CUSTOMER_ID:-cust-race-dup-ref-$(date +%s)}"
 EXTERNAL_REF="${EXTERNAL_REF:-dup-ref-$(date +%s)}"
 
 echo "==> Scenario C: duplicate external_reference_id (concurrency=$CONCURRENCY)"
+load_log_responses_dir
 
 BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "USD")
 load_track_bill "$BILL_ID"
@@ -38,6 +39,9 @@ SUCCESS=0
 for ((i = 0; i < CONCURRENCY; i++)); do
   f="$(_outfile "$i")"
   id=$(jq -r '.id // empty' < "$f")
+  if [[ "${LOAD_VERBOSE:-}" == "1" || "$CONCURRENCY" -le 5 || "$i" -eq 0 || "$i" -eq 1 || "$i" -eq $((CONCURRENCY - 1)) ]]; then
+    load_log_saved_response "req-$i" "$f"
+  fi
   if [[ -n "$id" ]]; then
     ((SUCCESS++)) || true
   else
@@ -46,6 +50,10 @@ for ((i = 0; i < CONCURRENCY; i++)); do
     load_fail "line item add failed"
   fi
 done
+
+if [[ "${LOAD_VERBOSE:-}" != "1" && "$CONCURRENCY" -gt 5 ]]; then
+  echo "    ... ($((CONCURRENCY - 3)) more responses in $LOAD_TMPDIR/resp-*.json)"
+fi
 
 UNIQUE_LINES=$(jq -r '.id // empty' "$LOAD_TMPDIR"/resp-*.json | sort -u | grep -c . || true)
 COUNT=$(load_bill_line_item_count "$BILL_ID")

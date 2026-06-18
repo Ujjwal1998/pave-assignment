@@ -22,6 +22,7 @@ EXPECTED_TOTAL="${3:-}"
 echo "==> Auditing bill $BILL_ID"
 
 BILL=$(load_get_bill "$BILL_ID")
+load_log_json_response "audit get bill" "$BILL"
 STATUS=$(echo "$BILL" | jq -r '.status')
 COUNT=$(echo "$BILL" | jq '.line_items | length')
 DISTINCT=$(echo "$BILL" | jq '[.line_items[].external_reference_id] | unique | length')

@@ -17,7 +17,8 @@ func BillStateMiddleware(req middleware.Request, next middleware.Next) middlewar
 	if resp.Err == nil {
 		return resp
 	}
-	if errors.Is(resp.Err, domain.ErrBillAlreadyClosed) {
+	if errors.Is(resp.Err, domain.ErrBillAlreadyClosed) ||
+		errors.Is(resp.Err, domain.ErrBillNotYetOpen) {
 		resp.HTTPStatus = http.StatusUnprocessableEntity
 	}
 	return resp

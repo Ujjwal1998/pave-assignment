@@ -31,6 +31,8 @@ echo "==> Closing open bills (SKIP_WORKFLOW_CLEANUP ignored)"
 for raw in "$@"; do
   bill_id=$(normalize_bill_id "$raw")
   echo "    bill-$bill_id"
+  status=$(load_bill_status "$bill_id" 2>/dev/null || echo unknown)
+  echo "    [before close] status=$status"
   load_close_bill_if_open "$bill_id"
 done
 echo "==> Done"

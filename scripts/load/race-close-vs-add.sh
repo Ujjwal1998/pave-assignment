@@ -17,6 +17,7 @@ CUSTOMER_ID="${CUSTOMER_ID:-cust-race-close-add-$(date +%s)}"
 RUN_ID="${RUN_ID:-$(date +%s)}"
 
 echo "==> Scenario D1: close vs concurrent adds (adds=$ADDS)"
+load_log_responses_dir
 
 BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "USD")
 load_track_bill "$BILL_ID"
@@ -27,6 +28,7 @@ _race_add() {
   local ref="race-${RUN_ID}-${i}"
   local body id
   body=$(load_add_line_item "$BILL_ID" "$ref" "2.50" "2025-05-08" 2>/dev/null || echo '{}')
+  echo "$body" > "$LOAD_TMPDIR/add-body-$i.json"
   id=$(echo "$body" | jq -r '.id // empty')
   if [[ -n "$id" ]]; then
     echo "ok $ref $id" > "$LOAD_TMPDIR/add-$i"
@@ -36,9 +38,10 @@ _race_add() {
 }
 
 _race_close() {
-  local code
-  code=$(load_close_bill_status "$BILL_ID")
-  echo "$code" > "$LOAD_TMPDIR/close-status"
+  local body
+  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close")
+  echo "$(load_last_http_code)" > "$LOAD_TMPDIR/close-status"
+  echo "$body" > "$LOAD_TMPDIR/close-body.json"
 }
 
 for ((i = 0; i < ADDS; i++)); do
@@ -49,6 +52,7 @@ wait
 
 CLOSE_CODE=$(cat "$LOAD_TMPDIR/close-status")
 echo "    close_http=$CLOSE_CODE"
+load_log_json_response "close response" "$(cat "$LOAD_TMPDIR/close-body.json")"
 
 if [[ "$CLOSE_CODE" != "200" ]]; then
   load_fail "close did not succeed (code=$CLOSE_CODE)"
@@ -58,6 +62,13 @@ OK_ADDS=0
 REJECTED_ADDS=0
 for ((i = 0; i < ADDS; i++)); do
   line=$(cat "$LOAD_TMPDIR/add-$i")
+  if [[ "${LOAD_VERBOSE:-}" == "1" || "$i" -eq 0 || "$i" -eq 1 || "$i" -eq $((ADDS - 1)) ]]; then
+    if [[ "$line" == ok* ]]; then
+      load_log_json_response "add req-$i" "$(cat "$LOAD_TMPDIR/add-body-$i.json")"
+    else
+      load_log_json_response "rejected add req-$i" "$(cat "$LOAD_TMPDIR/add-body-$i.json")"
+    fi
+  fi
   if [[ "$line" == ok* ]]; then
     ((OK_ADDS++)) || true
   else
@@ -65,7 +76,12 @@ for ((i = 0; i < ADDS; i++)); do
   fi
 done
 
+if [[ "${LOAD_VERBOSE:-}" != "1" && "$ADDS" -gt 3 ]]; then
+  echo "    ... ($((ADDS - 3)) more add responses in $LOAD_TMPDIR/add-body-*.json)"
+fi
+
 BILL=$(load_get_bill "$BILL_ID")
+load_log_json_response "final bill" "$BILL"
 STATUS=$(echo "$BILL" | jq -r '.status')
 COUNT=$(echo "$BILL" | jq '.line_items | length')
 SUM=$(echo "$BILL" | jq '[.line_items[].total_amount | tonumber] | add // 0')

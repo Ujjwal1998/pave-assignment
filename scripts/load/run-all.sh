@@ -23,6 +23,7 @@ load_require_tools
 
 echo "==> pave-bank load / race test suite"
 echo "    BASE_URL=$BASE_URL"
+echo "    (set LOAD_VERBOSE=1 for full JSON bodies from each script)"
 echo "    (open bills are auto-closed on exit unless SKIP_WORKFLOW_CLEANUP=1)"
 echo
 

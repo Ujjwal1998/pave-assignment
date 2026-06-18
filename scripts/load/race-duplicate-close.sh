@@ -15,19 +15,26 @@ CONCURRENCY="${CONCURRENCY:-30}"
 CUSTOMER_ID="${CUSTOMER_ID:-cust-race-close-$(date +%s)}"
 
 echo "==> Scenario E: duplicate close (concurrency=$CONCURRENCY)"
+load_log_responses_dir
 
 BILL_ID=$(load_create_bill "$CUSTOMER_ID" "2025-05-01" "2025-05-31" "USD")
 load_track_bill "$BILL_ID"
 echo "    bill_id=$BILL_ID"
 
-load_add_line_item "$BILL_ID" "sub-1" "50.00" "2025-05-01" >/dev/null
-load_add_line_item "$BILL_ID" "sub-2" "25.00" "2025-05-02" >/dev/null
+ADD1=$(load_add_line_item "$BILL_ID" "sub-1" "50.00" "2025-05-01")
+load_log_json_response "setup add sub-1" "$ADD1"
+ADD2=$(load_add_line_item "$BILL_ID" "sub-2" "25.00" "2025-05-02")
+load_log_json_response "setup add sub-2" "$ADD2"
 
 _outfile() { echo "$LOAD_TMPDIR/close-$1"; }
+_bodyfile() { echo "$LOAD_TMPDIR/close-body-$1.json"; }
 
 _race_close() {
   local i="$1"
-  load_close_bill_status "$BILL_ID" > "$(_outfile "$i")"
+  local body
+  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close")
+  echo "$(load_last_http_code)" > "$(_outfile "$i")"
+  echo "$body" > "$(_bodyfile "$i")"
 }
 
 for ((i = 0; i < CONCURRENCY; i++)); do
@@ -39,6 +46,10 @@ OK=0
 CONFLICT=0
 for ((i = 0; i < CONCURRENCY; i++)); do
   code=$(cat "$(_outfile "$i")")
+  if [[ "${LOAD_VERBOSE:-}" == "1" || "$i" -eq 0 || "$i" -eq 1 || "$i" -eq $((CONCURRENCY - 1)) ]]; then
+    echo "    [close req-$i] http=$code"
+    load_log_json_response "close req-$i" "$(cat "$(_bodyfile "$i")")"
+  fi
   if [[ "$code" == "200" ]]; then
     ((OK++)) || true
   elif [[ "$code" == "400" || "$code" == "422" ]]; then
@@ -47,6 +58,10 @@ for ((i = 0; i < CONCURRENCY; i++)); do
     load_fail "unexpected close status $code"
   fi
 done
+
+if [[ "${LOAD_VERBOSE:-}" != "1" && "$CONCURRENCY" -gt 3 ]]; then
+  echo "    ... ($((CONCURRENCY - 3)) more close responses in $LOAD_TMPDIR/close-body-*.json)"
+fi
 
 echo "    close_200=$OK close_4xx=$CONFLICT"
 
@@ -61,6 +76,7 @@ if [[ "$OK" -gt 1 && "$CONFLICT" -eq 0 ]]; then
 fi
 
 BILL=$(load_get_bill "$BILL_ID")
+load_log_json_response "final bill" "$BILL"
 STATUS=$(echo "$BILL" | jq -r '.status')
 TOTAL=$(echo "$BILL" | jq -r '.total_amount')
 COUNT=$(echo "$BILL" | jq '.line_items | length')

@@ -25,6 +25,14 @@ func (activityStore) GetBillCurrency(ctx context.Context, billID string) (string
 	return bill.Currency, nil
 }
 
+func (activityStore) ActivateBill(ctx context.Context, billID string) error {
+	return ActivateBill(ctx, billID)
+}
+
+func (activityStore) EnsureBillClosing(ctx context.Context, billID string) error {
+	return EnsureBillClosing(ctx, billID)
+}
+
 func (activityStore) UpdateAccrualTotal(ctx context.Context, billID string, accrualTotal decimal.Decimal) error {
 	return UpdateAccrualTotal(ctx, billID, accrualTotal)
 }

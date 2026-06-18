@@ -40,7 +40,6 @@ func TestBillWorkflowAccruesLineItemsUntilClose(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 
 	env.RegisterWorkflow(BillWorkflow)
-
 	env.OnActivity(activity.UpdateAccrualTotal, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(activity.UpdateBillClosed, mock.Anything, mock.Anything).Return(nil)
 
@@ -164,4 +163,46 @@ func TestAccrualStateAddItemReturnsFalseForDuplicate(t *testing.T) {
 	require.True(t, state.addItem(item))
 	require.False(t, state.addItem(item))
 	require.Equal(t, 1, state.LineItemCount)
+}
+
+func TestBillWorkflowActivatesScheduledBill(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	env.SetStartTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	env.RegisterWorkflow(BillWorkflow)
+	env.OnActivity(activity.ActivateBill, mock.Anything, mock.MatchedBy(func(in activity.ActivateBillInput) bool {
+		return in.BillID == "bill-1"
+	})).Return(nil).Once()
+	env.OnActivity(activity.UpdateBillClosed, mock.Anything, mock.Anything).Return(nil)
+
+	env.RegisterDelayedCallback(func() {
+		result, err := env.QueryWorkflow(StatusQueryName)
+		require.NoError(t, err)
+
+		var status ProcessStatus
+		require.NoError(t, result.Get(&status))
+		require.Equal(t, PhaseAccruing, status.Phase)
+
+		env.SignalWorkflow(CloseSignalName, CloseSignalPayload{})
+	}, time.Hour*24*20)
+
+	env.ExecuteWorkflow(BillWorkflow, Input{
+		BillID:      "bill-1",
+		CustomerID:  "cust_001",
+		Currency:    "USD",
+		PeriodStart: time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC),
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+}
+
+func TestAutoCloseTime(t *testing.T) {
+	got := autoCloseTime(time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC))
+	want := time.Date(2025, 7, 1, 0, 0, 0, 0, time.UTC)
+	require.Equal(t, want, got)
 }

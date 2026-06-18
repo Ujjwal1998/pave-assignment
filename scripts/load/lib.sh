@@ -11,6 +11,11 @@ LOAD_BILL_REGISTRY="${LOAD_BILL_REGISTRY:-$LOAD_TMPDIR/bills-to-close}"
 load_init() {
   mkdir -p "$LOAD_TMPDIR"
   : >"$LOAD_BILL_REGISTRY"
+  echo "000" >"$LOAD_TMPDIR/load-last-http-code"
+}
+
+load_last_http_code() {
+  cat "${LOAD_TMPDIR}/load-last-http-code"
 }
 
 load_cleanup() {
@@ -24,19 +29,86 @@ load_cleanup() {
 
 # Print where per-request JSON responses are written.
 load_log_responses_dir() {
-  echo "    responses_dir=$LOAD_TMPDIR"
+  echo "    responses_dir=$LOAD_TMPDIR" >&2
 }
 
 # Log one saved API response: path, HTTP-style code field, and key ids.
 load_log_saved_response() {
   local label="$1" file="$2"
-  local code id
-  code=$(jq -r '.code // "ok"' < "$file")
-  id=$(jq -r '.id // .details.bill_id // .details.bill.id // empty' < "$file")
-  echo "    [$label] file=$file code=$code bill_id=${id:-<none>}"
-  if [[ "${LOAD_VERBOSE:-}" == "1" ]]; then
-    jq -c . < "$file" | sed 's/^/        /'
+  echo "    [$label] file=$file" >&2
+  load_log_json_response "$label" "$(cat "$file")"
+}
+
+# Print key fields from an API JSON response (bill, line item, close, or error).
+# Logs go to stderr so callers can safely use $(load_create_bill ...) etc.
+load_log_json_response() {
+  local label="$1" json="$2"
+  [[ -n "$json" ]] || return 0
+
+  local code message id bill_id status currency total accrual ref fee_type line_count
+
+  code=$(echo "$json" | jq -r '.code // empty')
+  message=$(echo "$json" | jq -r '.message // empty')
+
+  if [[ -n "$code" && "$code" != "null" ]]; then
+    bill_id=$(echo "$json" | jq -r '.details.bill_id // .details.bill.id // empty')
+    echo "    [$label] error code=$code message=${message:-<none>} bill_id=${bill_id:-<none>}" >&2
+    if [[ "${LOAD_VERBOSE:-}" == "1" ]]; then
+      echo "$json" | jq -c . | sed 's/^/        /' >&2
+    fi
+    return 0
   fi
+
+  id=$(echo "$json" | jq -r '.id // .bill_id // empty')
+  status=$(echo "$json" | jq -r '.status // empty')
+  currency=$(echo "$json" | jq -r '.currency // empty')
+  total=$(echo "$json" | jq -r '.total_amount // empty')
+  accrual=$(echo "$json" | jq -r '.accrual_total // empty')
+  ref=$(echo "$json" | jq -r '.external_reference_id // empty')
+  fee_type=$(echo "$json" | jq -r '.fee_type // empty')
+  line_count=$(echo "$json" | jq -r 'if .line_item_count != null then .line_item_count elif .line_items != null then (.line_items | length) else empty end')
+
+  if [[ -n "$fee_type" && "$fee_type" != "null" ]]; then
+    echo "    [$label] line_item_id=${id:-<none>} fee_type=$fee_type ref=${ref:-<none>} total=${total:-<none>} currency=${currency:-<none>}" >&2
+    return 0
+  fi
+
+  local parts=()
+  [[ -n "$id" && "$id" != "null" ]] && parts+=("id=$id")
+  [[ -n "$status" && "$status" != "null" ]] && parts+=("status=$status")
+  [[ -n "$currency" && "$currency" != "null" ]] && parts+=("currency=$currency")
+  [[ -n "$accrual" && "$accrual" != "null" ]] && parts+=("accrual_total=$accrual")
+  [[ -n "$total" && "$total" != "null" ]] && parts+=("total_amount=$total")
+  [[ -n "$line_count" && "$line_count" != "null" ]] && parts+=("line_items=$line_count")
+
+  if [[ ${#parts[@]} -gt 0 ]]; then
+    echo "    [$label] ${parts[*]}" >&2
+  else
+    echo "    [$label] $(echo "$json" | jq -c 'with_entries(select(.value != null and .value != ""))' 2>/dev/null || echo "$json")" >&2
+  fi
+
+  if [[ "${LOAD_VERBOSE:-}" == "1" ]]; then
+    echo "$json" | jq -c . | sed 's/^/        /' >&2
+  fi
+}
+
+# HTTP request that captures status code and prints the body.
+# Status is persisted to LOAD_TMPDIR/load-last-http-code so it survives $(...) subshells.
+load_http_json_with_status() {
+  local method="$1" path="$2" body="${3:-}"
+  local tmp code_file
+  mkdir -p "${LOAD_TMPDIR:-/tmp}"
+  code_file="${LOAD_TMPDIR:-/tmp}/load-last-http-code"
+  tmp="${LOAD_TMPDIR:-/tmp}/curl-$$-$(date +%s%N).json"
+  if [[ -n "$body" ]]; then
+    LOAD_LAST_HTTP_CODE=$(curl -s -o "$tmp" -w '%{http_code}' -X "$method" "$BASE_URL$path" \
+      -H 'Content-Type: application/json' -d "$body")
+  else
+    LOAD_LAST_HTTP_CODE=$(curl -s -o "$tmp" -w '%{http_code}' -X "$method" "$BASE_URL$path")
+  fi
+  echo "$LOAD_LAST_HTTP_CODE" >"$code_file"
+  cat "$tmp"
+  rm -f "$tmp"
 }
 
 # load_track_bill registers a bill for automatic close on script exit.
@@ -59,11 +131,14 @@ load_close_bill_if_open() {
   [[ -n "$bill_id" ]] || return 0
   status=$(load_bill_status "$bill_id" 2>/dev/null || echo unknown)
   if [[ "$status" == "open" ]]; then
-    code=$(load_close_bill_status "$bill_id")
-    if [[ "$code" == "200" ]]; then
+    local close_resp
+    close_resp=$(load_close_bill "$bill_id")
+    if echo "$close_resp" | jq -e '.total_amount // .bill_id' >/dev/null 2>&1; then
+      load_log_json_response "cleanup close" "$close_resp"
       echo "    closed bill $bill_id (workflow bill-$bill_id should complete)"
     else
-      echo "WARN: failed to close bill $bill_id (http $code)" >&2
+      echo "WARN: failed to close bill $bill_id" >&2
+      load_log_json_response "cleanup close failed" "$close_resp"
     fi
   fi
 }
@@ -83,6 +158,51 @@ load_close_tracked_bills() {
 load_require_tools() {
   command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
   command -v jq   >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
+}
+
+# Set PERIOD_START, PERIOD_END, and EFFECTIVE to the current UTC month.
+# Use for verify scripts so bills stay open (not scheduled) and are not
+# auto-closed immediately by past period_end (Phase 2).
+load_set_open_period() {
+  read -r PERIOD_START PERIOD_END EFFECTIVE <<EOF
+$(python3 - <<'PY'
+from datetime import date, timedelta
+today = date.today()
+start = date(today.year, today.month, 1)
+if today.month == 12:
+    next_month = date(today.year + 1, 1, 1)
+else:
+    next_month = date(today.year, today.month + 1, 1)
+end = next_month - timedelta(days=1)
+effective = start + timedelta(days=14)
+print(start.isoformat(), end.isoformat(), effective.isoformat())
+PY
+)
+EOF
+}
+
+load_period_end_from_start() {
+  python3 - "$1" <<'PY'
+from datetime import date, timedelta
+import sys
+y, m, d = map(int, sys.argv[1].split("-"))
+start = date(y, m, d)
+if start.month == 12:
+    next_month = date(start.year + 1, 1, 1)
+else:
+    next_month = date(start.year, start.month + 1, 1)
+print((next_month - timedelta(days=1)).isoformat())
+PY
+}
+
+load_effective_from_start() {
+  python3 - "$1" <<'PY'
+from datetime import date, timedelta
+import sys
+y, m, d = map(int, sys.argv[1].split("-"))
+start = date(y, m, d)
+print((start + timedelta(days=14)).isoformat())
+PY
 }
 
 load_http_code() {
@@ -115,6 +235,7 @@ load_create_bill() {
     --arg cur "$currency" \
     '{customer_id:$c, period_start:$ps, period_end:$pe, currency:$cur}')
   resp=$(load_http_json POST /bills "$body")
+  load_log_json_response "create bill" "$resp"
   bill_id=$(echo "$resp" | jq -r '.id // .details.bill_id // .details.bill.id // empty')
   if [[ -z "$bill_id" ]]; then
     echo "failed to create bill: $resp" >&2
