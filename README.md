@@ -38,7 +38,20 @@ temporal workflow query --workflow-id bill-{id} --name accrual
 `status` returns phase, `accrual_total`, line item count, and period dates.  
 `accrual` returns the full in-memory accrual state including line item payloads.
 
-**API read model:** open bills expose `accrual_total` on `GET /bills/:id`, persisted by the workflow after each line-item signal. Closed bills use `total_amount`; `accrual_total` is cleared on finalize.
+### Close (Phase 3)
+
+`POST /bills/:id/close` is **async by default** — returns **202 Accepted** with `{ bill_id, status: "closing" }` and runs the close workflow in the background. Poll `GET /bills/:id` until `status` is `closed`.
+
+- **`?wait=true`** — blocks until finalization completes and returns **200** with the full `CloseBillResponse` (used by verify/load scripts).
+- **`POST /bills/:id/finalize`** — recovery when a bill is stuck in `closing` with no `total_amount`.
+
+Close workflow steps (visible in Temporal history):
+
+1. `EnsureBillClosing` — freeze line items (`open` → `closing`)
+2. `ComputeTotal` — sum line items with FX
+3. `FinalizeBillTotal` — write `total_amount`, clear `accrual_total` (`closing` → `closed`)
+
+**Auto-close:** at **00:00 UTC on the day after `period_end`**, the workflow closes the bill without an API call (single timer per bill).
 
 ## Prerequisites
 
@@ -88,6 +101,7 @@ Or manually:
 ./scripts/verify-multi-currency.sh   # USD bill + GEL line items → FX-converted close total
 ./scripts/verify-accrual.sh          # accrual_total in DB matches Temporal status query
 ./scripts/verify-lifecycle.sh        # scheduled bills reject line items until period start
+./scripts/verify-close-async.sh      # async close (202) then poll until closed
 ```
 
 Or manually (full flow):
@@ -112,7 +126,7 @@ curl -X POST "http://localhost:4000/bills/$BILL_ID/line-items" \
   -H 'Content-Type: application/json' \
   -d '{"fee_type":"usage","description":"API calls","quantity":"5000","unit_price":"0.001","effective_date":"2025-01-15","external_reference_id":"usage-jan-2025-api"}'
 
-curl -X POST "http://localhost:4000/bills/$BILL_ID/close" | jq
+curl -X POST "http://localhost:4000/bills/$BILL_ID/close?wait=true" | jq
 curl "http://localhost:4000/bills/$BILL_ID" | jq
 ```
 
@@ -131,7 +145,8 @@ Check workflow `bill-$BILL_ID` is **Completed** in the Temporal UI.
 |------|------|
 | 404 | Bill not found |
 | 409 | Duplicate bill (create) or duplicate close |
-| 422 | Line item on closed bill |
+| 422 | Line item on closed/scheduled bill; close on already-closed bill |
+| 202 | Close accepted (`status: closing`) — poll GET until `closed` |
 | 400 | Validation error (invalid fee_type, period, UUID, etc.) |
 
 On duplicate bill create, the existing bill id is returned in `details.bill_id`.
@@ -173,7 +188,7 @@ go test -tags=integration ./tests/integration/ -run TestRace -v -count=1
 ```
 billing/     Encore service (API, DB, Temporal worker)
 workflow/    BillWorkflow definition
-activity/    ComputeTotal, UpdateBillClosed, UpdateAccrualTotal, ActivateBill
+activity/    ComputeTotal, FinalizeBillTotal, EnsureBillClosing, UpdateAccrualTotal, ActivateBill
 domain/      Pure types and errors
 money/       decimal ↔ money adapter, FX conversion
 docs/        Architecture and data model reference

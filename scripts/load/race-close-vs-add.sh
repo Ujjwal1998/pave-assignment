@@ -39,7 +39,7 @@ _race_add() {
 
 _race_close() {
   local body
-  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close")
+  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close?wait=true")
   echo "$(load_last_http_code)" > "$LOAD_TMPDIR/close-status"
   echo "$body" > "$LOAD_TMPDIR/close-body.json"
 }

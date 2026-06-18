@@ -8,12 +8,13 @@ import (
 )
 
 type mockStore struct {
-	currency     string
-	amounts      []LineAmount
-	accrualID    string
-	accrualTotal decimal.Decimal
-	closedID     string
-	closedAmt    decimal.Decimal
+	currency         string
+	amounts          []LineAmount
+	accrualID        string
+	accrualTotal     decimal.Decimal
+	ensuredClosingID string
+	closedID         string
+	closedAmt        decimal.Decimal
 }
 
 func (m *mockStore) ListLineItemAmounts(context.Context, string) ([]LineAmount, error) {
@@ -34,7 +35,8 @@ func (m *mockStore) ActivateBill(context.Context, string) error {
 	return nil
 }
 
-func (m *mockStore) EnsureBillClosing(context.Context, string) error {
+func (m *mockStore) EnsureBillClosing(_ context.Context, billID string) error {
+	m.ensuredClosingID = billID
 	return nil
 }
 
@@ -101,6 +103,38 @@ func TestComputeTotalEmptyBill(t *testing.T) {
 	}
 }
 
+func TestEnsureBillClosingActivity(t *testing.T) {
+	mock := &mockStore{}
+	withStore(t, mock)
+
+	err := EnsureBillClosing(context.Background(), EnsureBillClosingInput{BillID: "bill-1"})
+	if err != nil {
+		t.Fatalf("EnsureBillClosing: %v", err)
+	}
+	if mock.ensuredClosingID != "bill-1" {
+		t.Fatalf("ensured bill id = %q", mock.ensuredClosingID)
+	}
+}
+
+func TestFinalizeBillTotalActivity(t *testing.T) {
+	mock := &mockStore{}
+	withStore(t, mock)
+
+	err := FinalizeBillTotal(context.Background(), FinalizeBillTotalInput{
+		BillID:      "bill-1",
+		TotalAmount: "42.00",
+	})
+	if err != nil {
+		t.Fatalf("FinalizeBillTotal: %v", err)
+	}
+	if mock.closedID != "bill-1" {
+		t.Fatalf("closed bill id = %q", mock.closedID)
+	}
+	if !mock.closedAmt.Equal(decimal.MustParse("42.00")) {
+		t.Fatalf("closed total = %s, want 42.00", mock.closedAmt)
+	}
+}
+
 func TestUpdateBillClosed(t *testing.T) {
 	mock := &mockStore{
 		currency: "USD",
@@ -115,6 +149,9 @@ func TestUpdateBillClosed(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("UpdateBillClosed: %v", err)
+	}
+	if mock.ensuredClosingID != "bill-1" {
+		t.Fatalf("ensured closing bill id = %q", mock.ensuredClosingID)
 	}
 	if mock.closedID != "bill-1" {
 		t.Fatalf("closed bill id = %q", mock.closedID)

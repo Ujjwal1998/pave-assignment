@@ -30,7 +30,9 @@ func initService() (*Service, error) {
 	queue := encore.Meta().Environment.Name + "-" + workflow.BaseTaskQueueName
 	w := worker.New(tc, queue, worker.Options{})
 	w.RegisterWorkflow(workflow.BillWorkflow)
-	w.RegisterActivity(activity.UpdateBillClosed)
+	w.RegisterActivity(activity.EnsureBillClosing)
+	w.RegisterActivity(activity.ComputeTotal)
+	w.RegisterActivity(activity.FinalizeBillTotal)
 	w.RegisterActivity(activity.UpdateAccrualTotal)
 	w.RegisterActivity(activity.ActivateBill)
 

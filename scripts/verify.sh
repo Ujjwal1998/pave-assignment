@@ -56,8 +56,8 @@ DUP_RESP=$(curl -sf -X POST "$BASE_URL/bills/$BILL_ID/line-items" \
     '{fee_type:"subscription",description:"Monthly plan",quantity:"1",unit_price:"99.00",effective_date:$date,external_reference_id:"sub-verify"}')")
 load_log_json_response "idempotent resend" "$DUP_RESP"
 
-echo "==> Closing bill"
-CLOSE_RESP=$(curl -sf -X POST "$BASE_URL/bills/$BILL_ID/close")
+echo "==> Closing bill (sync wait=true)"
+CLOSE_RESP=$(curl -sf -X POST "$BASE_URL/bills/$BILL_ID/close?wait=true")
 load_log_json_response "close bill" "$CLOSE_RESP"
 TOTAL=$(echo "$CLOSE_RESP" | jq -r '.total_amount')
 

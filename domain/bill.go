@@ -48,3 +48,9 @@ type CloseBillResponse struct {
 	ClosedAt      time.Time       `json:"closed_at"`
 	LineItems     []LineItem      `json:"line_items"`
 }
+
+// CloseBillAccepted is returned with HTTP 202 when close is accepted asynchronously.
+type CloseBillAccepted struct {
+	BillID string     `json:"bill_id"`
+	Status BillStatus `json:"status"`
+}

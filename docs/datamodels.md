@@ -168,7 +168,19 @@ temporal workflow query --workflow-id bill-{id} --name accrual
 |----------|---------|
 | `ActivateBill` | `scheduled` → `open` at period start |
 | `UpdateAccrualTotal` | Write workflow running total to `bills.accrual_total` |
-| `UpdateBillClosed` | `EnsureBillClosing` + `ComputeTotal` + `FinalizeBillTotal` |
+| `EnsureBillClosing` | `open` → `closing` (idempotent; used by auto-close and close segment) |
+| `ComputeTotal` | Sum line items in bill currency (FX) |
+| `FinalizeBillTotal` | `closing` → `closed`; set `total_amount`, clear `accrual_total` |
+
+Close is a **three-step workflow segment** after the accrual loop exits (close signal or auto-close timer).
+
+### API close behaviour (Phase 3)
+
+| Request | Response |
+|---------|----------|
+| `POST /bills/:id/close` | **202** `{ bill_id, status: "closing" }` — async; poll GET until `closed` |
+| `POST /bills/:id/close?wait=true` | **200** full `CloseBillResponse` when workflow completes |
+| `POST /bills/:id/finalize` | **200** recovery when stuck in `closing` with NULL `total_amount` |
 
 ---
 

@@ -313,12 +313,38 @@ load_add_line_item_status() {
 
 load_close_bill() {
   local bill_id="$1"
-  load_http_json POST "/bills/$bill_id/close"
+  local wait="${2:-true}"
+  if [[ "$wait" == "true" ]]; then
+    load_http_json POST "/bills/$bill_id/close?wait=true"
+  else
+    load_http_json POST "/bills/$bill_id/close"
+  fi
 }
 
 load_close_bill_status() {
   local bill_id="$1"
-  load_http_code POST "/bills/$bill_id/close"
+  local wait="${2:-true}"
+  if [[ "$wait" == "true" ]]; then
+    load_http_code POST "/bills/$bill_id/close?wait=true"
+  else
+    load_http_code POST "/bills/$bill_id/close"
+  fi
+}
+
+# Poll GET /bills/:id until status=closed or timeout.
+load_wait_for_closed() {
+  local bill_id="$1" tries="${2:-40}" delay="${3:-0.25}"
+  local i=0 status
+  while [[ $i -lt $tries ]]; do
+    status=$(load_get_bill "$bill_id" | jq -r '.status')
+    if [[ "$status" == "closed" ]]; then
+      echo "$status"
+      return 0
+    fi
+    sleep "$delay"
+    i=$((i + 1))
+  done
+  return 1
 }
 
 load_get_bill() {

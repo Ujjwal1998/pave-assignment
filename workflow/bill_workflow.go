@@ -54,9 +54,21 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 
 	lineItemCh := workflow.GetSignalChannel(ctx, LineItemSignalName)
 	closeCh := workflow.GetSignalChannel(ctx, CloseSignalName)
-	autoCloseAt := autoCloseTime(input.PeriodEnd)
 
-	for {
+	autoCloseAt := autoCloseTime(input.PeriodEnd)
+	var autoCloseTimer workflow.Future
+	autoCloseTimerRegistered := false
+	autoClosePastDue := false
+	if !autoCloseAt.IsZero() {
+		now := workflow.Now(ctx)
+		if !autoCloseAt.After(now) {
+			autoClosePastDue = true
+		} else {
+			autoCloseTimer = workflow.NewTimer(ctx, autoCloseAt.Sub(now))
+		}
+	}
+
+	for phase == PhaseAccruing {
 		selector := workflow.NewSelector(ctx)
 
 		var lineItem LineItemSignalPayload
@@ -73,20 +85,20 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 			closed = true
 		})
 
-		if !autoCloseAt.IsZero() && phase == PhaseAccruing {
-			now := workflow.Now(ctx)
-			if !autoCloseAt.After(now) {
+		if autoClosePastDue {
+			closed = true
+			autoClosePastDue = false
+		} else if autoCloseTimer != nil && !autoCloseTimerRegistered {
+			autoCloseTimerRegistered = true
+			selector.AddFuture(autoCloseTimer, func(f workflow.Future) {
+				_ = f.Get(ctx, nil)
 				closed = true
-			} else {
-				timerFuture := workflow.NewTimer(ctx, autoCloseAt.Sub(now))
-				selector.AddFuture(timerFuture, func(f workflow.Future) {
-					_ = f.Get(ctx, nil)
-					closed = true
-				})
-			}
+			})
 		}
 
-		selector.Select(ctx)
+		if !closed {
+			selector.Select(ctx)
+		}
 
 		if itemAdded {
 			if err := workflow.ExecuteActivity(activityCtx, activity.UpdateAccrualTotal, activity.UpdateAccrualTotalInput{
@@ -103,9 +115,7 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 		}
 	}
 
-	return workflow.ExecuteActivity(activityCtx, activity.UpdateBillClosed, activity.UpdateBillClosedInput{
-		BillID: input.BillID,
-	}).Get(activityCtx, nil)
+	return runBillClose(ctx, activityCtx, input.BillID)
 }
 
 // autoCloseTime returns the instant after period_end when the bill should auto-close.

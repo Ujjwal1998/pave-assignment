@@ -32,7 +32,7 @@ _bodyfile() { echo "$LOAD_TMPDIR/close-body-$1.json"; }
 _race_close() {
   local i="$1"
   local body
-  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close")
+  body=$(load_http_json_with_status POST "/bills/$BILL_ID/close?wait=true")
   echo "$(load_last_http_code)" > "$(_outfile "$i")"
   echo "$body" > "$(_bodyfile "$i")"
 }

@@ -83,7 +83,7 @@ func closeBillIfOpen(t *testing.T, billID string) {
 	if bill["status"] != "open" {
 		return
 	}
-	res := apiJSON(t, http.MethodPost, "/bills/"+billID+"/close", nil)
+	res := apiJSON(t, http.MethodPost, "/bills/"+billID+"/close?wait=true", nil)
 	if res.status != http.StatusOK {
 		t.Logf("cleanup close bill %s: status=%d body=%s", billID, res.status, res.body)
 	}
@@ -176,7 +176,7 @@ func TestRaceDuplicateClose(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			res := apiJSON(t, http.MethodPost, "/bills/"+billID+"/close", nil)
+			res := apiJSON(t, http.MethodPost, "/bills/"+billID+"/close?wait=true", nil)
 			if res.status == http.StatusOK {
 				okCount.Add(1)
 			} else if res.status != 422 && res.status != 400 {
@@ -224,7 +224,7 @@ func TestRaceCloseVsAdds(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		res := apiJSON(t, http.MethodPost, "/bills/"+billID+"/close", nil)
+		res := apiJSON(t, http.MethodPost, "/bills/"+billID+"/close?wait=true", nil)
 		if res.status != http.StatusOK {
 			t.Errorf("close: status=%d body=%s", res.status, res.body)
 		}
