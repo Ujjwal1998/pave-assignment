@@ -52,15 +52,21 @@ type ProcessStatus struct {
 	PeriodEnd     time.Time `json:"period_end"`
 }
 
-// LineItemSignalPayload is sent to the workflow when a line item is persisted.
+// LineItemSignalPayload is the add-fee request sent to the workflow (Phase 4).
+// The workflow persists via PersistLineItem before updating accrual state.
 type LineItemSignalPayload struct {
-	LineItemID          string    `json:"line_item_id"`
-	ExternalReferenceID string    `json:"external_reference_id"`
-	FeeType             string    `json:"fee_type"`
-	Description         string    `json:"description"`
-	TotalAmount         string    `json:"total_amount"`
-	Currency            string    `json:"currency"`
-	EffectiveDate       time.Time `json:"effective_date"`
+	ExternalReferenceID string `json:"external_reference_id"`
+	FeeType             string `json:"fee_type"`
+	Description         string `json:"description"`
+	Quantity            string `json:"quantity"`
+	UnitPrice           string `json:"unit_price"`
+	Currency            string `json:"currency"`
+	EffectiveDate       string `json:"effective_date"` // YYYY-MM-DD
+
+	// Populated in workflow state after PersistLineItem (queries / accrual mirror).
+	LineItemID  string    `json:"line_item_id,omitempty"`
+	TotalAmount string    `json:"total_amount,omitempty"`
+	EffectiveAt time.Time `json:"effective_at,omitempty"`
 }
 
 // AccrualState is the running fee accrual tracked by the workflow.

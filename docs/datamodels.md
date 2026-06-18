@@ -159,20 +159,19 @@ temporal workflow query --workflow-id bill-{id} --name accrual
 
 | Signal | When sent | Effect |
 |--------|-----------|--------|
-| `bill.line_item.added` | After each successful `POST /line-items` | Update in-memory accrual; persist `accrual_total` |
-| `bill.close` | After `POST /close` marks bill `closing` | Exit accrual loop; run `UpdateBillClosed` |
+| `bill.line_item.added` | After `POST /line-items` validates the request | `PersistLineItem` activity writes the row; `accrual_total` updated |
+| `bill.close` | After `POST /close` marks bill `closing` | Exit accrual loop; run close segment |
 
 ### Activities
 
 | Activity | Purpose |
 |----------|---------|
 | `ActivateBill` | `scheduled` → `open` at period start |
+| `PersistLineItem` | Insert line item (idempotent); workflow-led accrual (Phase 4) |
 | `UpdateAccrualTotal` | Write workflow running total to `bills.accrual_total` |
 | `EnsureBillClosing` | `open` → `closing` (idempotent; used by auto-close and close segment) |
 | `ComputeTotal` | Sum line items in bill currency (FX) |
 | `FinalizeBillTotal` | `closing` → `closed`; set `total_amount`, clear `accrual_total` |
-
-Close is a **three-step workflow segment** after the accrual loop exits (close signal or auto-close timer).
 
 ### API close behaviour (Phase 3)
 

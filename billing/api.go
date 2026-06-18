@@ -98,27 +98,27 @@ func (s *Service) AddLineItem(ctx context.Context, id string, req *domain.AddLin
 		return nil, mapValidationErr(err)
 	}
 
-	result, err := InsertLineItem(ctx, params)
-	if err != nil {
-		return nil, mapDomainErr(err)
-	}
-
-	if err := s.temporalClient.SignalWorkflow(ctx, workflow.WorkflowID(id), "", workflow.LineItemSignalName, lineItemSignalPayload(result.LineItem)); err != nil {
+	if err := s.temporalClient.SignalWorkflow(ctx, workflow.WorkflowID(id), "", workflow.LineItemSignalName, lineItemSignalPayload(params)); err != nil {
 		return nil, errs.B().Code(errs.Internal).Msg("failed to signal bill workflow with line item").Cause(err).Err()
 	}
 
-	return &result.LineItem, nil
+	item, err := waitForLineItem(ctx, id, params.ExternalReferenceID)
+	if err != nil {
+		return nil, errs.B().Code(errs.Internal).Msg("line item not persisted by workflow").Cause(err).Err()
+	}
+
+	return &item, nil
 }
 
-func lineItemSignalPayload(item domain.LineItem) workflow.LineItemSignalPayload {
+func lineItemSignalPayload(params InsertLineItemParams) workflow.LineItemSignalPayload {
 	return workflow.LineItemSignalPayload{
-		LineItemID:          item.ID,
-		ExternalReferenceID: item.ExternalReferenceID,
-		FeeType:             string(item.FeeType),
-		Description:         item.Description,
-		TotalAmount:         item.TotalAmount.String(),
-		Currency:            item.Currency,
-		EffectiveDate:       item.EffectiveDate,
+		ExternalReferenceID: params.ExternalReferenceID,
+		FeeType:             string(params.FeeType),
+		Description:         params.Description,
+		Quantity:            params.Quantity.String(),
+		UnitPrice:           params.UnitPrice.String(),
+		Currency:            params.Currency,
+		EffectiveDate:       params.EffectiveDate.Format("2006-01-02"),
 	}
 }
 

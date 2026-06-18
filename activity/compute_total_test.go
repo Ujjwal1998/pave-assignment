@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/govalues/decimal"
 )
@@ -33,6 +34,35 @@ func (m *mockStore) UpdateAccrualTotal(_ context.Context, billID string, total d
 
 func (m *mockStore) ActivateBill(context.Context, string) error {
 	return nil
+}
+
+func (m *mockStore) PersistLineItem(_ context.Context, in PersistLineItemInput) (PersistLineItemResult, error) {
+	q, err := decimal.Parse(in.Quantity)
+	if err != nil {
+		return PersistLineItemResult{}, err
+	}
+	p, err := decimal.Parse(in.UnitPrice)
+	if err != nil {
+		return PersistLineItemResult{}, err
+	}
+	total, err := q.Mul(p)
+	if err != nil {
+		return PersistLineItemResult{}, err
+	}
+	eff, err := time.Parse("2006-01-02", in.EffectiveDate)
+	if err != nil {
+		return PersistLineItemResult{}, err
+	}
+	return PersistLineItemResult{
+		LineItemID:          "li-" + in.ExternalReferenceID,
+		ExternalReferenceID: in.ExternalReferenceID,
+		FeeType:             in.FeeType,
+		Description:         in.Description,
+		TotalAmount:         total.String(),
+		Currency:            in.Currency,
+		EffectiveDate:       eff,
+		Created:             true,
+	}, nil
 }
 
 func (m *mockStore) EnsureBillClosing(_ context.Context, billID string) error {

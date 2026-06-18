@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,12 +15,48 @@ import (
 )
 
 func registerCloseActivities(env *testsuite.TestWorkflowEnvironment) {
+	env.RegisterActivity(activity.EnsureBillClosing)
+	env.RegisterActivity(activity.ComputeTotal)
+	env.RegisterActivity(activity.FinalizeBillTotal)
 	env.OnActivity(activity.EnsureBillClosing, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(activity.ComputeTotal, mock.Anything, mock.Anything).Return(activity.ComputeTotalResult{
 		TotalAmount: mustDecimal("0"),
 		Currency:    "USD",
 	}, nil)
 	env.OnActivity(activity.FinalizeBillTotal, mock.Anything, mock.Anything).Return(nil)
+}
+
+func registerPersistActivities(env *testsuite.TestWorkflowEnvironment) {
+	env.RegisterActivity(activity.PersistLineItem)
+	seen := map[string]bool{}
+	totals := map[string]struct{ amount, currency string }{
+		"sub-apr":   {"99.00", "USD"},
+		"usage-apr": {"5.00", "USD"},
+		"usage-gel": {"100.00", "GEL"},
+	}
+	env.OnActivity(activity.PersistLineItem, mock.Anything, mock.Anything).Return(
+		func(_ context.Context, in activity.PersistLineItemInput) (activity.PersistLineItemResult, error) {
+			eff, err := time.Parse("2006-01-02", in.EffectiveDate)
+			if err != nil {
+				return activity.PersistLineItemResult{}, err
+			}
+			row, ok := totals[in.ExternalReferenceID]
+			if !ok {
+				return activity.PersistLineItemResult{}, fmt.Errorf("unknown ref %q", in.ExternalReferenceID)
+			}
+			created := !seen[in.ExternalReferenceID]
+			seen[in.ExternalReferenceID] = true
+			return activity.PersistLineItemResult{
+				LineItemID:          "li-" + in.ExternalReferenceID,
+				ExternalReferenceID: in.ExternalReferenceID,
+				FeeType:             in.FeeType,
+				Description:         in.Description,
+				TotalAmount:         row.amount,
+				Currency:            row.currency,
+				EffectiveDate:       eff,
+				Created:             created,
+			}, nil
+		})
 }
 
 func mustDecimal(s string) decimal.Decimal {
@@ -56,33 +94,37 @@ func TestBillWorkflowAccruesLineItemsUntilClose(t *testing.T) {
 	env.SetStartTime(time.Date(2025, 4, 15, 0, 0, 0, 0, time.UTC))
 
 	env.RegisterWorkflow(BillWorkflow)
+	registerPersistActivities(env)
 	env.OnActivity(activity.UpdateAccrualTotal, mock.Anything, mock.Anything).Return(nil)
 	registerCloseActivities(env)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(LineItemSignalName, LineItemSignalPayload{
-			LineItemID:          "li-1",
 			ExternalReferenceID: "sub-apr",
 			FeeType:             "subscription",
 			Description:         "Monthly plan",
-			TotalAmount:         "99.00",
+			Quantity:            "1",
+			UnitPrice:           "99.00",
 			Currency:            "USD",
-			EffectiveDate:       time.Date(2025, 4, 1, 0, 0, 0, 0, time.UTC),
+			EffectiveDate:       "2025-04-01",
 		})
 		env.SignalWorkflow(LineItemSignalName, LineItemSignalPayload{
-			LineItemID:          "li-2",
 			ExternalReferenceID: "usage-apr",
 			FeeType:             "usage",
 			Description:         "API calls",
-			TotalAmount:         "5.00",
+			Quantity:            "1",
+			UnitPrice:           "5.00",
 			Currency:            "USD",
-			EffectiveDate:       time.Date(2025, 4, 15, 0, 0, 0, 0, time.UTC),
+			EffectiveDate:       "2025-04-15",
 		})
 		env.SignalWorkflow(LineItemSignalName, LineItemSignalPayload{
-			LineItemID:          "li-1-dup",
 			ExternalReferenceID: "sub-apr",
-			TotalAmount:         "99.00",
+			FeeType:             "subscription",
+			Description:         "Monthly plan",
+			Quantity:            "1",
+			UnitPrice:           "99.00",
 			Currency:            "USD",
+			EffectiveDate:       "2025-04-01",
 		})
 	}, time.Millisecond)
 
@@ -105,7 +147,7 @@ func TestBillWorkflowAccruesLineItemsUntilClose(t *testing.T) {
 		require.Equal(t, 2, status.LineItemCount)
 
 		env.SignalWorkflow(CloseSignalName, CloseSignalPayload{})
-	}, 2*time.Millisecond)
+	}, 100*time.Millisecond)
 
 	env.ExecuteWorkflow(BillWorkflow, Input{
 		BillID:      "bill-1",
@@ -125,25 +167,28 @@ func TestBillWorkflowAccruesMixedCurrencyInBillCurrency(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 
 	env.RegisterWorkflow(BillWorkflow)
+	registerPersistActivities(env)
 	env.OnActivity(activity.UpdateAccrualTotal, mock.Anything, mock.Anything).Return(nil)
 	registerCloseActivities(env)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(LineItemSignalName, LineItemSignalPayload{
-			LineItemID:          "li-1",
 			ExternalReferenceID: "sub-apr",
 			FeeType:             "subscription",
-			TotalAmount:         "99.00",
+			Description:         "Monthly plan",
+			Quantity:            "1",
+			UnitPrice:           "99.00",
 			Currency:            "USD",
-			EffectiveDate:       time.Date(2025, 4, 1, 0, 0, 0, 0, time.UTC),
+			EffectiveDate:       "2025-04-01",
 		})
 		env.SignalWorkflow(LineItemSignalName, LineItemSignalPayload{
-			LineItemID:          "li-2",
 			ExternalReferenceID: "usage-gel",
 			FeeType:             "usage",
-			TotalAmount:         "100.00",
+			Description:         "Local usage",
+			Quantity:            "1",
+			UnitPrice:           "100.00",
 			Currency:            "GEL",
-			EffectiveDate:       time.Date(2025, 4, 15, 0, 0, 0, 0, time.UTC),
+			EffectiveDate:       "2025-04-15",
 		})
 	}, time.Millisecond)
 
@@ -157,7 +202,7 @@ func TestBillWorkflowAccruesMixedCurrencyInBillCurrency(t *testing.T) {
 		require.Equal(t, "136.00", state.RunningTotal)
 
 		env.SignalWorkflow(CloseSignalName, CloseSignalPayload{})
-	}, 2*time.Millisecond)
+	}, 100*time.Millisecond)
 
 	env.ExecuteWorkflow(BillWorkflow, Input{
 		BillID:     "bill-1",

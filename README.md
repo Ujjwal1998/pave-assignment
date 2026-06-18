@@ -6,13 +6,13 @@ Progressive accrual billing API built with [Encore](https://encore.dev) and [Tem
 
 ```
 POST /bills          → DB insert + start Temporal workflow (bill-{id})
-POST /bills/:id/line-items → DB insert + signal workflow (progressive accrual)
-POST /close          → Signal workflow → ComputeTotal → UpdateBillClosed
+POST /bills/:id/line-items → validate + signal workflow → PersistLineItem activity → poll DB
+POST /close          → freeze bill + signal workflow → close segment (async 202 or ?wait=true)
 GET /bills/:id       → DB read (line items included while open and when closed)
 ```
 
 - **Postgres** (via Encore `sqldb`) is the source of truth for reads.
-- **Temporal** tracks progressive accrual via line-item signals; query `accrual` on workflow `bill-{id}` for live state.
+- **Temporal** tracks progressive accrual via line-item signals; the workflow **persists** each fee via `PersistLineItem` (Phase 4).
 - **Worker** runs inside `encore run` on task queue `{env}-billing`.
 
 ### Bill lifecycle (process-oriented)
@@ -38,7 +38,15 @@ temporal workflow query --workflow-id bill-{id} --name accrual
 `status` returns phase, `accrual_total`, line item count, and period dates.  
 `accrual` returns the full in-memory accrual state including line item payloads.
 
-### Close (Phase 3)
+### Line items (Phase 4)
+
+`POST /bills/:id/line-items` validates the request, **signals the workflow**, and polls Postgres until the row appears:
+
+```
+validate → signal workflow → PersistLineItem activity → GET /bills/:id (poll)
+```
+
+The workflow is the single writer for fee persistence; Temporal history is the accrual audit trail.
 
 `POST /bills/:id/close` is **async by default** — returns **202 Accepted** with `{ bill_id, status: "closing" }` and runs the close workflow in the background. Poll `GET /bills/:id` until `status` is `closed`.
 

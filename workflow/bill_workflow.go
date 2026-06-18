@@ -75,7 +75,7 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 		itemAdded := false
 		selector.AddReceive(lineItemCh, func(c workflow.ReceiveChannel, _ bool) {
 			c.Receive(ctx, &lineItem)
-			itemAdded = state.addItem(lineItem)
+			itemAdded = true
 		})
 
 		closed := false
@@ -101,10 +101,7 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 		}
 
 		if itemAdded {
-			if err := workflow.ExecuteActivity(activityCtx, activity.UpdateAccrualTotal, activity.UpdateAccrualTotalInput{
-				BillID:       input.BillID,
-				AccrualTotal: state.RunningTotal,
-			}).Get(activityCtx, nil); err != nil {
+			if err := persistAndAccrue(ctx, activityCtx, &state, input.BillID, lineItem); err != nil {
 				return err
 			}
 		}

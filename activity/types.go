@@ -16,6 +16,7 @@ type Store interface {
 	GetBillCurrency(ctx context.Context, billID string) (string, error)
 	ActivateBill(ctx context.Context, billID string) error
 	EnsureBillClosing(ctx context.Context, billID string) error
+	PersistLineItem(ctx context.Context, input PersistLineItemInput) (PersistLineItemResult, error)
 	UpdateAccrualTotal(ctx context.Context, billID string, accrualTotal decimal.Decimal) error
 	FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error
 }
