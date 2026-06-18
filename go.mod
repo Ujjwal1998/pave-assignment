@@ -7,6 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/govalues/decimal v0.1.36
 	github.com/govalues/money v0.2.4
+	github.com/jackc/pgx/v5 v5.7.6
 	github.com/stretchr/testify v1.11.1
 	go.temporal.io/sdk v1.44.1
 )
@@ -20,7 +21,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/nexus-rpc/sdk-go v0.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

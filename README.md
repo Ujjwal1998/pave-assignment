@@ -6,13 +6,13 @@ Progressive accrual billing API built with [Encore](https://encore.dev) and [Tem
 
 ```
 POST /bills          → DB insert + start Temporal workflow (bill-{id})
-POST /line-items     → DB only (idempotent via external_reference_id)
+POST /bills/:id/line-items → DB insert + signal workflow (progressive accrual)
 POST /close          → Signal workflow → ComputeTotal → UpdateBillClosed
-GET /bills/:id       → DB read (line items included when closed)
+GET /bills/:id       → DB read (line items included while open and when closed)
 ```
 
 - **Postgres** (via Encore `sqldb`) is the source of truth for reads.
-- **Temporal** manages the open → closed lifecycle; line items are not on the critical path.
+- **Temporal** tracks progressive accrual via line-item signals; query `accrual` on workflow `bill-{id}` for live state.
 - **Worker** runs inside `encore run` on task queue `{env}-billing`.
 
 ## Prerequisites
@@ -107,6 +107,20 @@ On duplicate bill create, the existing bill id is returned in `details.bill_id`.
 ```bash
 ENCORERUNTIME_NOPANIC=1 go test ./...
 encore test ./...
+```
+
+### Load / race-condition tests
+
+With Temporal and Encore running:
+
+```bash
+./scripts/load/run-all.sh
+```
+
+See [scripts/load/README.md](scripts/load/README.md) for individual scenarios and Go integration tests:
+
+```bash
+go test -tags=integration ./tests/integration/ -run TestRace -v -count=1
 ```
 
 ## Project layout

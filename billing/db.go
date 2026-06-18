@@ -9,6 +9,7 @@ import (
 
 	"encore.dev/storage/sqldb"
 	"github.com/govalues/decimal"
+	"github.com/jackc/pgx/v5/pgconn"
 	"pave-bank/activity"
 	"pave-bank/domain"
 )
@@ -112,22 +113,51 @@ func UpdateWorkflowRunID(ctx context.Context, billID, workflowRunID string) erro
 	return nil
 }
 
-func MarkBillClosed(ctx context.Context, billID string, totalAmount decimal.Decimal) (domain.Bill, error) {
+// MarkBillClosedImmediate atomically transitions the bill from open to closed,
+// freezing line items immediately so concurrent AddLineItem calls are rejected.
+// total_amount is left NULL; the workflow fills it via FinalizeBillTotal.
+//
+// Returns (needsFinalization=true, nil) when the bill is already closed but
+// has no total yet (workflow died mid-close) — caller should re-run finalization.
+// Returns (false, ErrBillAlreadyClosed) when the bill is fully closed.
+func MarkBillClosedImmediate(ctx context.Context, billID string) (needsFinalization bool, err error) {
 	const query = `
 		UPDATE bills
-		SET status = 'closed', total_amount = $2, closed_at = now()
+		SET status = 'closed', closed_at = now()
 		WHERE id = $1 AND status = 'open'
-		RETURNING` + billColumns
+		RETURNING id`
 
-	row := billingDB.QueryRow(ctx, query, billID, totalAmount)
-	bill, err := scanBill(row)
-	if errors.Is(err, sqldb.ErrNoRows) {
-		return domain.Bill{}, classifyBillUpdateFailure(ctx, billID)
+	var id string
+	scanErr := billingDB.QueryRow(ctx, query, billID).Scan(&id)
+	if scanErr == nil {
+		return false, nil
 	}
+	if !errors.Is(scanErr, sqldb.ErrNoRows) {
+		return false, fmt.Errorf("mark bill closed immediate: %w", scanErr)
+	}
+
+	bill, err := GetBillByID(ctx, billID)
 	if err != nil {
-		return domain.Bill{}, fmt.Errorf("close bill: %w", err)
+		return false, err
 	}
-	return bill, nil
+	if bill.Status == domain.BillStatusClosed && bill.TotalAmount == nil {
+		return true, nil
+	}
+	if bill.Status == domain.BillStatusClosed {
+		return false, domain.ErrBillAlreadyClosed
+	}
+	return false, domain.ErrBillNotFound
+}
+
+// FinalizeBillTotal writes the computed total onto an already-closed bill.
+// Safe to call multiple times (idempotent on workflow retry).
+func FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error {
+	const query = `UPDATE bills SET total_amount = $2 WHERE id = $1 AND status = 'closed'`
+	_, err := billingDB.Exec(ctx, query, billID, totalAmount)
+	if err != nil {
+		return fmt.Errorf("finalize bill total: %w", err)
+	}
+	return nil
 }
 
 func InsertLineItem(ctx context.Context, params InsertLineItemParams) (InsertLineItemResult, error) {
@@ -157,7 +187,7 @@ func InsertLineItem(ctx context.Context, params InsertLineItemParams) (InsertLin
 		return InsertLineItemResult{LineItem: item, Created: true}, nil
 	}
 	if !errors.Is(err, sqldb.ErrNoRows) {
-		return InsertLineItemResult{}, fmt.Errorf("insert line item: %w", err)
+		return InsertLineItemResult{}, classifyLineItemInsertErr(err)
 	}
 
 	existing, err := getLineItemByExternalRef(ctx, params.BillID, params.ExternalReferenceID)
@@ -180,7 +210,7 @@ func ListLineItems(ctx context.Context, billID string) ([]domain.LineItem, error
 	}
 	defer rows.Close()
 
-	var items []domain.LineItem
+	items := make([]domain.LineItem, 0)
 	for rows.Next() {
 		item, err := scanLineItem(rows)
 		if err != nil {
@@ -258,15 +288,15 @@ func getLineItemByExternalRef(ctx context.Context, billID, externalReferenceID s
 	return item, nil
 }
 
-func classifyBillUpdateFailure(ctx context.Context, billID string) error {
-	bill, err := GetBillByID(ctx, billID)
-	if err != nil {
-		return err
+func classifyLineItemInsertErr(err error) error {
+	if err == nil {
+		return nil
 	}
-	if bill.Status == domain.BillStatusClosed {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23514" {
 		return domain.ErrBillAlreadyClosed
 	}
-	return domain.ErrBillNotFound
+	return fmt.Errorf("insert line item: %w", err)
 }
 
 type rowScanner interface {

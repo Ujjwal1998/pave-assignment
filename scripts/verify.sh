@@ -55,10 +55,10 @@ if [ "$STATUS" != "400" ] && [ "$STATUS" != "422" ]; then
   exit 1
 fi
 
-echo "==> Verify duplicate close returns 409"
+echo "==> Verify duplicate close returns 422"
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/bills/$BILL_ID/close")
-if [ "$STATUS" != "409" ]; then
-  echo "expected 409 for duplicate close, got $STATUS" >&2
+if [ "$STATUS" != "422" ]; then
+  echo "expected 422 for duplicate close, got $STATUS" >&2
   exit 1
 fi
 

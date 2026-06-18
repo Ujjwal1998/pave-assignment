@@ -46,4 +46,5 @@ type AddLineItemRequest struct {
 	UnitPrice           string  `json:"unit_price"`
 	EffectiveDate       string  `json:"effective_date"`
 	ExternalReferenceID string  `json:"external_reference_id"`
+	Currency            string  `json:"currency,omitempty"` // optional; must match bill currency if provided
 }

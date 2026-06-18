@@ -27,10 +27,9 @@ func initService() (*Service, error) {
 
 	activity.Init(newActivityStore())
 
-	queue := encore.Meta().Environment.Name + "-billing"
+	queue := encore.Meta().Environment.Name + "-" + workflow.BaseTaskQueueName
 	w := worker.New(tc, queue, worker.Options{})
 	w.RegisterWorkflow(workflow.BillWorkflow)
-	w.RegisterActivity(activity.ComputeTotal)
 	w.RegisterActivity(activity.UpdateBillClosed)
 
 	if err := w.Start(); err != nil {

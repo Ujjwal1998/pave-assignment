@@ -14,7 +14,7 @@ type LineAmount struct {
 type Store interface {
 	ListLineItemAmounts(ctx context.Context, billID string) ([]LineAmount, error)
 	GetBillCurrency(ctx context.Context, billID string) (string, error)
-	MarkBillClosed(ctx context.Context, billID string, totalAmount decimal.Decimal) error
+	FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error
 }
 
 type ComputeTotalResult struct {
@@ -23,9 +23,7 @@ type ComputeTotalResult struct {
 }
 
 type UpdateBillClosedInput struct {
-	BillID      string
-	TotalAmount decimal.Decimal
-	Currency    string
+	BillID string
 }
 
 var store Store

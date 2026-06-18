@@ -9,8 +9,14 @@ func UpdateBillClosed(ctx context.Context, input UpdateBillClosedInput) error {
 	if store == nil {
 		return fmt.Errorf("activity store is not initialized")
 	}
-	if err := store.MarkBillClosed(ctx, input.BillID, input.TotalAmount); err != nil {
-		return fmt.Errorf("mark bill closed: %w", err)
+
+	result, err := ComputeTotal(ctx, input.BillID)
+	if err != nil {
+		return fmt.Errorf("compute total: %w", err)
+	}
+
+	if err := store.FinalizeBillTotal(ctx, input.BillID, result.TotalAmount); err != nil {
+		return fmt.Errorf("finalize bill total: %w", err)
 	}
 	return nil
 }

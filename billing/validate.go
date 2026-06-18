@@ -2,14 +2,12 @@ package billing
 
 import (
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/govalues/decimal"
 	"pave-bank/domain"
+	"pave-bank/money"
 )
-
-var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 
 func parseCreateBillRequest(req *domain.CreateBillRequest) (CreateBillParams, error) {
 	if req == nil {
@@ -30,8 +28,8 @@ func parseCreateBillRequest(req *domain.CreateBillRequest) (CreateBillParams, er
 	if !periodEnd.After(periodStart) {
 		return CreateBillParams{}, fmt.Errorf("period_end must be after period_start")
 	}
-	if !currencyPattern.MatchString(req.Currency) {
-		return CreateBillParams{}, fmt.Errorf("currency must be a 3-letter ISO 4217 code")
+	if err := money.ValidateCurrency(req.Currency); err != nil {
+		return CreateBillParams{}, err
 	}
 
 	return CreateBillParams{
@@ -71,6 +69,9 @@ func parseAddLineItemRequest(req *domain.AddLineItemRequest, bill domain.Bill) (
 	}
 	if req.EffectiveDate == "" {
 		return InsertLineItemParams{}, fmt.Errorf("effective_date is required")
+	}
+	if req.Currency != "" && req.Currency != bill.Currency {
+		return InsertLineItemParams{}, domain.ErrCurrencyMismatch
 	}
 
 	quantity, err := parsePositiveDecimal(req.Quantity, "quantity")

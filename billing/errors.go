@@ -21,13 +21,13 @@ func mapDomainErr(err error) error {
 
 	switch {
 	case errors.Is(err, domain.ErrBillNotFound):
-		return errs.B().Code(errs.NotFound).Msg(err.Error()).Err()
+		return errs.B().Code(errs.NotFound).Msg(err.Error()).Cause(err).Err()
 	case errors.Is(err, domain.ErrBillAlreadyClosed):
-		return errs.B().Code(errs.FailedPrecondition).Msg(err.Error()).Err()
+		return errs.B().Code(errs.FailedPrecondition).Msg(err.Error()).Cause(err).Err()
 	case errors.Is(err, domain.ErrBillAlreadyExists):
-		return errs.B().Code(errs.AlreadyExists).Msg(err.Error()).Err()
+		return errs.B().Code(errs.AlreadyExists).Msg(err.Error()).Cause(err).Err()
 	case errors.Is(err, domain.ErrDuplicateLineItem):
-		return errs.B().Code(errs.AlreadyExists).Msg(err.Error()).Err()
+		return errs.B().Code(errs.AlreadyExists).Msg(err.Error()).Cause(err).Err()
 	case errors.Is(err, domain.ErrCurrencyMismatch),
 		errors.Is(err, domain.ErrLineItemOutOfPeriod),
 		errors.Is(err, domain.ErrInvalidDecimal):

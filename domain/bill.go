@@ -35,12 +35,13 @@ type CreateBillRequest struct {
 }
 
 type CloseBillResponse struct {
-	BillID      string          `json:"bill_id"`
-	CustomerID  string          `json:"customer_id"`
-	PeriodStart string          `json:"period_start"`
-	PeriodEnd   string          `json:"period_end"`
-	Currency    string          `json:"currency"`
-	TotalAmount decimal.Decimal `json:"total_amount"`
-	ClosedAt    time.Time       `json:"closed_at"`
-	LineItems   []LineItem      `json:"line_items"`
+	BillID        string          `json:"bill_id"`
+	CustomerID    string          `json:"customer_id"`
+	PeriodStart   string          `json:"period_start"`
+	PeriodEnd     string          `json:"period_end"`
+	Currency      string          `json:"currency"`
+	TotalAmount   decimal.Decimal `json:"total_amount"`
+	LineItemCount int             `json:"line_item_count"`
+	ClosedAt      time.Time       `json:"closed_at"`
+	LineItems     []LineItem      `json:"line_items"`
 }

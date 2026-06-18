@@ -10,9 +10,50 @@ import (
 )
 
 func BillWorkflow(ctx workflow.Context, input Input) error {
+	if !input.PeriodStart.IsZero() {
+		now := workflow.Now(ctx)
+		if input.PeriodStart.After(now) {
+			if err := workflow.NewTimer(ctx, input.PeriodStart.Sub(now)).Get(ctx, nil); err != nil {
+				return err
+			}
+		}
+	}
+
+	state := AccrualState{
+		BillID:   input.BillID,
+		Currency: input.Currency,
+	}
+
+	if err := workflow.SetQueryHandler(ctx, AccrualQueryName, func() (AccrualState, error) {
+		return state, nil
+	}); err != nil {
+		return err
+	}
+
+	lineItemCh := workflow.GetSignalChannel(ctx, LineItemSignalName)
 	closeCh := workflow.GetSignalChannel(ctx, CloseSignalName)
-	var sig CloseSignalPayload
-	closeCh.Receive(ctx, &sig)
+
+	for {
+		selector := workflow.NewSelector(ctx)
+
+		var lineItem LineItemSignalPayload
+		selector.AddReceive(lineItemCh, func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, &lineItem)
+			state.addItem(lineItem)
+		})
+
+		closed := false
+		var closeSig CloseSignalPayload
+		selector.AddReceive(closeCh, func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, &closeSig)
+			closed = true
+		})
+
+		selector.Select(ctx)
+		if closed {
+			break
+		}
+	}
 
 	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -22,14 +63,7 @@ func BillWorkflow(ctx workflow.Context, input Input) error {
 		},
 	})
 
-	var result activity.ComputeTotalResult
-	if err := workflow.ExecuteActivity(activityCtx, activity.ComputeTotal, input.BillID).Get(activityCtx, &result); err != nil {
-		return err
-	}
-
 	return workflow.ExecuteActivity(activityCtx, activity.UpdateBillClosed, activity.UpdateBillClosedInput{
-		BillID:      input.BillID,
-		TotalAmount: result.TotalAmount,
-		Currency:    result.Currency,
+		BillID: input.BillID,
 	}).Get(activityCtx, nil)
 }

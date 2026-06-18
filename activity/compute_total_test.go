@@ -22,7 +22,7 @@ func (m *mockStore) GetBillCurrency(context.Context, string) (string, error) {
 	return m.currency, nil
 }
 
-func (m *mockStore) MarkBillClosed(_ context.Context, billID string, total decimal.Decimal) error {
+func (m *mockStore) FinalizeBillTotal(_ context.Context, billID string, total decimal.Decimal) error {
 	m.closedID = billID
 	m.closedAmt = total
 	return nil
@@ -68,14 +68,16 @@ func TestComputeTotalEmptyBill(t *testing.T) {
 }
 
 func TestUpdateBillClosed(t *testing.T) {
-	mock := &mockStore{}
+	mock := &mockStore{
+		currency: "USD",
+		amounts: []LineAmount{
+			{Amount: decimal.MustParse("42.00"), Currency: "USD"},
+		},
+	}
 	withStore(t, mock)
 
-	total := decimal.MustParse("42.00")
 	err := UpdateBillClosed(context.Background(), UpdateBillClosedInput{
-		BillID:      "bill-1",
-		TotalAmount: total,
-		Currency:    "USD",
+		BillID: "bill-1",
 	})
 	if err != nil {
 		t.Fatalf("UpdateBillClosed: %v", err)
@@ -83,7 +85,7 @@ func TestUpdateBillClosed(t *testing.T) {
 	if mock.closedID != "bill-1" {
 		t.Fatalf("closed bill id = %q", mock.closedID)
 	}
-	if !mock.closedAmt.Equal(total) {
-		t.Fatalf("closed total = %s", mock.closedAmt)
+	if !mock.closedAmt.Equal(decimal.MustParse("42.00")) {
+		t.Fatalf("closed total = %s, want 42.00", mock.closedAmt)
 	}
 }

@@ -2,7 +2,6 @@ package billing
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/govalues/decimal"
 	"pave-bank/activity"
@@ -26,10 +25,6 @@ func (activityStore) GetBillCurrency(ctx context.Context, billID string) (string
 	return bill.Currency, nil
 }
 
-func (activityStore) MarkBillClosed(ctx context.Context, billID string, totalAmount decimal.Decimal) error {
-	_, err := MarkBillClosed(ctx, billID, totalAmount)
-	if err != nil {
-		return fmt.Errorf("close bill: %w", err)
-	}
-	return nil
+func (activityStore) FinalizeBillTotal(ctx context.Context, billID string, totalAmount decimal.Decimal) error {
+	return FinalizeBillTotal(ctx, billID, totalAmount)
 }
